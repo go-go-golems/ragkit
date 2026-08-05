@@ -55,7 +55,7 @@ func calculateIDFromDigests(
 	lexical BackendIdentity,
 	vector *VectorIdentity,
 ) (string, error) {
-	id, err := digest.TruncatedJSON("ttc-", 16, identity{
+	id, err := digest.TruncatedJSON("rk-", 16, identity{
 		SchemaVersion:        SchemaVersion,
 		CorpusDigest:         corpusDigest,
 		Chunker:              chunker,
