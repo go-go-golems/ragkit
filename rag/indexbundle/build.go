@@ -136,8 +136,13 @@ func validateBuildInput(input BuildInput) error {
 		input.Chunker.OverlapRunes < 0 || input.Chunker.OverlapRunes >= input.Chunker.MaximumRunes {
 		return errors.New("valid bundle chunker identity is required")
 	}
+	// A nil Embedding identity requests a lexical-only bundle; vector inputs
+	// must then be absent so a half-configured build fails loudly.
 	if input.Embedding == nil {
-		return errors.New("vector embedding identity is required")
+		if input.QueryEmbedder != nil || len(input.Vectors) > 0 {
+			return errors.New("vector inputs supplied without an embedding identity")
+		}
+		return nil
 	}
 	if input.QueryEmbedder == nil || len(input.Vectors) != len(input.Representations) {
 		return errors.New("query embedder and one vector per representation are required")
@@ -171,12 +176,16 @@ func measureResult(ctx context.Context, path string, manifest Manifest, reused b
 	if err != nil {
 		return BuildResult{}, errors.Wrap(err, "measure bundle lexical index")
 	}
-	vectorInfo, err := os.Stat(filepath.Join(path, vectorName))
-	if err != nil {
-		return BuildResult{}, errors.Wrap(err, "measure bundle vector index")
+	var vectorBytes int64
+	if manifest.Vector != nil {
+		vectorInfo, err := os.Stat(filepath.Join(path, vectorName))
+		if err != nil {
+			return BuildResult{}, errors.Wrap(err, "measure bundle vector index")
+		}
+		vectorBytes = vectorInfo.Size()
 	}
 	return BuildResult{
 		Manifest: manifest, Path: path, Reused: reused,
-		BleveBytes: bleveBytes, VectorBytes: vectorInfo.Size(),
+		BleveBytes: bleveBytes, VectorBytes: vectorBytes,
 	}, nil
 }
