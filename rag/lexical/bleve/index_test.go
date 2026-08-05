@@ -1,0 +1,116 @@
+package bleve
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"testing"
+
+	"github.com/go-go-golems/ragkit/rag"
+)
+
+func TestBuildSearchReopen(t *testing.T) {
+	t.Parallel()
+	documents, chunks, representations := fixture()
+	path := filepath.Join(t.TempDir(), "bm25.bleve")
+	index, manifest, err := Build(context.Background(), Config{Path: path}, documents, chunks, representations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.RepresentationCount != 2 {
+		t.Fatalf("representation count = %d", manifest.RepresentationCount)
+	}
+	if manifest.Version != ManifestVersion {
+		t.Fatalf("manifest version = %d, want %d", manifest.Version, ManifestVersion)
+	}
+	hits, err := index.Search(context.Background(), rag.Query{Text: "oak soil"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || hits[0].ChunkID != "chunk-oak" || hits[0].DocumentID != "doc-oak" {
+		t.Fatalf("unexpected hits: %#v", hits)
+	}
+	if err := index.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	reopenedHits, err := reopened.Search(context.Background(), rag.Query{Text: "oak soil"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reopenedHits) != len(hits) || reopenedHits[0].RepresentationID != hits[0].RepresentationID {
+		t.Fatalf("reopen mismatch: %#v != %#v", reopenedHits, hits)
+	}
+}
+
+func TestSearchOrdersTiesBeforeApplyingLimit(t *testing.T) {
+	t.Parallel()
+	const (
+		count = 30
+		limit = 20
+	)
+	documents := make([]rag.Document, 0, count)
+	chunks := make([]rag.Chunk, 0, count)
+	representations := make([]rag.Representation, 0, count)
+	// Insert in descending identity order. All records have identical title and
+	// body statistics, producing an equal-score group larger than the cutoff.
+	// Representation IDs deliberately sort opposite to chunk IDs so the test
+	// proves that source identity controls the provider-side cutoff.
+	for index := count - 1; index >= 0; index-- {
+		representationID := fmt.Sprintf("rep-%02d", count-1-index)
+		chunkID := fmt.Sprintf("chunk-%02d", index)
+		documentID := fmt.Sprintf("doc-%02d", index)
+		documents = append(documents, rag.Document{ID: documentID, Title: "Tied title"})
+		chunks = append(chunks, rag.Chunk{ID: chunkID, DocumentID: documentID, Text: "identical token"})
+		representations = append(representations, rag.Representation{
+			ID: representationID, ChunkID: chunkID, Kind: "raw",
+			Text: "identical token", ContentDigest: representationID,
+		})
+	}
+	path := filepath.Join(t.TempDir(), "ties.bleve")
+	index, _, err := Build(context.Background(), Config{Path: path}, documents, chunks, representations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = index.Close() }()
+
+	for repetition := 0; repetition < 3; repetition++ {
+		hits, err := index.Search(context.Background(), rag.Query{Text: "identical token"}, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) != limit {
+			t.Fatalf("hits = %d, want %d", len(hits), limit)
+		}
+		for position, hit := range hits {
+			wantChunk := fmt.Sprintf("chunk-%02d", position)
+			wantRepresentation := fmt.Sprintf("rep-%02d", count-1-position)
+			if hit.ChunkID != wantChunk || hit.RepresentationID != wantRepresentation {
+				t.Fatalf("repetition %d rank %d = (%q, %q), want (%q, %q)", repetition, position+1, hit.ChunkID, hit.RepresentationID, wantChunk, wantRepresentation)
+			}
+			if hit.Rank != position+1 {
+				t.Fatalf("repetition %d rank field = %d, want %d", repetition, hit.Rank, position+1)
+			}
+		}
+	}
+}
+
+func fixture() ([]rag.Document, []rag.Chunk, []rag.Representation) {
+	documents := []rag.Document{
+		{ID: "doc-oak", Title: "Oak planting"},
+		{ID: "doc-maple", Title: "Maple color"},
+	}
+	chunks := []rag.Chunk{
+		{ID: "chunk-oak", DocumentID: "doc-oak", Text: "oak trees like soil"},
+		{ID: "chunk-maple", DocumentID: "doc-maple", Text: "maple leaves are red"},
+	}
+	representations := []rag.Representation{
+		{ID: "rep-oak", ChunkID: "chunk-oak", Kind: "raw", Text: chunks[0].Text, ContentDigest: "oak"},
+		{ID: "rep-maple", ChunkID: "chunk-maple", Kind: "raw", Text: chunks[1].Text, ContentDigest: "maple"},
+	}
+	return documents, chunks, representations
+}
