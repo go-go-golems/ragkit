@@ -58,26 +58,28 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 	if expectedID != manifest.BundleID || !reflect.DeepEqual(kinds, manifest.RepresentationKinds) {
 		return nil, errors.New("bundle manifest identity does not match stored data")
 	}
-	if manifest.Vector == nil {
-		return nil, errors.New("bundle has no vector identity")
-	}
-	if manifest.Vector.RepresentationDigest != representationDigest {
-		return nil, errors.New("bundle vector representation digest mismatch")
-	}
-	if options.QueryEmbedder == nil {
-		return nil, errors.New("query embedder is required")
-	}
-	if options.EmbeddingModel != manifest.Vector.Model {
-		return nil, errors.Errorf(
-			"query embedding model %q differs from bundle model %q",
-			options.EmbeddingModel, manifest.Vector.Model,
-		)
-	}
-	if options.EmbeddingDimensions != manifest.Vector.Dimensions {
-		return nil, errors.Errorf(
-			"query embedding dimensions %d differ from bundle dimensions %d",
-			options.EmbeddingDimensions, manifest.Vector.Dimensions,
-		)
+	// Lexical-only bundles (no vector identity) are a supported serving and
+	// rollback configuration: they open without an embedder and expose a nil
+	// Vector index.
+	if manifest.Vector != nil {
+		if manifest.Vector.RepresentationDigest != representationDigest {
+			return nil, errors.New("bundle vector representation digest mismatch")
+		}
+		if options.QueryEmbedder == nil {
+			return nil, errors.New("query embedder is required")
+		}
+		if options.EmbeddingModel != manifest.Vector.Model {
+			return nil, errors.Errorf(
+				"query embedding model %q differs from bundle model %q",
+				options.EmbeddingModel, manifest.Vector.Model,
+			)
+		}
+		if options.EmbeddingDimensions != manifest.Vector.Dimensions {
+			return nil, errors.Errorf(
+				"query embedding dimensions %d differ from bundle dimensions %d",
+				options.EmbeddingDimensions, manifest.Vector.Dimensions,
+			)
+		}
 	}
 	lexical, err := bleveindex.Open(
 		filepath.Join(options.Path, bleveName), manifest.Lexical.Channel,
@@ -85,13 +87,16 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "open bundle lexical index")
 	}
-	vector, err := sqliteexact.Open(
-		filepath.Join(options.Path, vectorName),
-		manifest.Vector.Model, manifest.Vector.Channel, options.QueryEmbedder,
-	)
-	if err != nil {
-		_ = lexical.Close()
-		return nil, errors.Wrap(err, "open bundle vector index")
+	var vector rag.Index
+	if manifest.Vector != nil {
+		vector, err = sqliteexact.Open(
+			filepath.Join(options.Path, vectorName),
+			manifest.Vector.Model, manifest.Vector.Channel, options.QueryEmbedder,
+		)
+		if err != nil {
+			_ = lexical.Close()
+			return nil, errors.Wrap(err, "open bundle vector index")
+		}
 	}
 	return &Bundle{
 		Manifest: manifest, Chunks: data.chunks,
