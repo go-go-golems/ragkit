@@ -1,9 +1,8 @@
 # ragkit
 
 Reusable RAG (retrieval-augmented generation) building blocks for Go,
-extracted from the rag-ttc research codebase
-(`github.com/the-tree-center/rag-ttc`) per the CoinVault adoption plan
-(gec-rag ticket `GEC-RAG-ADOPT-001`).
+originally extracted from the
+[`rag-ttc`](https://github.com/the-tree-center/rag-ttc) research codebase.
 
 The package tree is contracts-first: `rag` holds the domain types and narrow
 component interfaces; everything else is a replaceable implementation.
@@ -38,8 +37,7 @@ Invariants preserved from upstream:
   representation hits, `Collapse` maps them to chunks, `Hydrate` produces
   evidence.
 - `HitRanksBefore` defines a complete ordering (score, document ID, chunk ID,
-  representation ID) — strengthened from upstream to satisfy the
-  GEC-RAG-PROD-001 determinism requirement.
+  representation ID) for deterministic retrieval results.
 
 Changes relative to rag-ttc:
 
@@ -63,3 +61,7 @@ with rag-ttc installations.
 ```bash
 go build ./... && go test ./... -count=1
 ```
+
+## License
+
+[MIT](LICENSE)
