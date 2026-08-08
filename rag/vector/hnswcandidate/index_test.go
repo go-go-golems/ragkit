@@ -1,0 +1,99 @@
+package hnswcandidate
+
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	"github.com/go-go-golems/ragkit/rag"
+	vectorutil "github.com/go-go-golems/ragkit/vector"
+)
+
+type fakeEmbedder struct{ vector []float32 }
+
+func (f fakeEmbedder) Embed(context.Context, rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
+	return rag.EmbeddingResult{Vectors: [][]float32{f.vector}}, nil
+}
+func fixtureEntries() []Entry {
+	return []Entry{{"rep-b", "chunk-b", "doc-b", []float32{0, 1}}, {"rep-a", "chunk-a", "doc-a", []float32{1, 0}}, {"rep-c", "chunk-c", "doc-c", []float32{-1, 0}}, {"rep-d", "chunk-d", "doc-d", []float32{0, -1}}}
+}
+func fixtureConfig() Config {
+	return Config{Model: "model", M: 2, Ml: .25, EfConstruction: 20, EfSearch: 20, Seed: 1}
+}
+
+func TestBuildSearchHasDeterministicBoundedRecall(t *testing.T) {
+	t.Parallel()
+	entries := fixtureEntries()
+	first, err := Build(fixtureConfig(), entries, fakeEmbedder{[]float32{1, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Build(fixtureConfig(), entries, fakeEmbedder{[]float32{1, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstHits, err := first.SearchVector([]float32{1, 0}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondHits, err := second.SearchVector([]float32{1, 0}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(firstHits) > 2 {
+		t.Fatalf("candidate bound = %d, want <= 2", len(firstHits))
+	}
+	if !reflect.DeepEqual(firstHits, secondHits) {
+		t.Fatalf("seeded results differ: first=%#v second=%#v", firstHits, secondHits)
+	}
+	if len(firstHits) != 2 || firstHits[0].RepresentationID != "rep-a" || firstHits[0].Rank != 1 {
+		t.Fatalf("unexpected hits: %#v", firstHits)
+	}
+	exact := exactIDs(t, entries, []float32{1, 0}, 2)
+	if recall(exact, firstHits) != 1 {
+		t.Fatalf("recall@2 = %v, want 1; exact=%v candidate=%v", recall(exact, firstHits), exact, firstHits)
+	}
+}
+func TestBuildRejectsInconsistentDimensions(t *testing.T) {
+	t.Parallel()
+	_, err := Build(fixtureConfig(), []Entry{{"a", "a", "a", []float32{1, 0}}, {"b", "b", "b", []float32{1}}}, fakeEmbedder{})
+	if err == nil {
+		t.Fatal("Build() error = nil, want inconsistent dimensions")
+	}
+}
+func exactIDs(t *testing.T, entries []Entry, query []float32, limit int) []string {
+	t.Helper()
+	hits := make([]rag.Hit, 0, len(entries))
+	for _, entry := range entries {
+		score, err := vectorutil.Cosine(query, entry.Values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hits = append(hits, rag.Hit{RepresentationID: entry.RepresentationID, ChunkID: entry.ChunkID, DocumentID: entry.DocumentID, Score: score})
+	}
+	for i := range hits {
+		for j := i + 1; j < len(hits); j++ {
+			if rag.HitRanksBefore(hits[j], hits[i]) {
+				hits[i], hits[j] = hits[j], hits[i]
+			}
+		}
+	}
+	ids := make([]string, 0, limit)
+	for _, hit := range hits[:limit] {
+		ids = append(ids, hit.RepresentationID)
+	}
+	return ids
+}
+func recall(exact []string, candidate []rag.Hit) float64 {
+	seen := map[string]bool{}
+	for _, hit := range candidate {
+		seen[hit.RepresentationID] = true
+	}
+	n := 0
+	for _, id := range exact {
+		if seen[id] {
+			n++
+		}
+	}
+	return float64(n) / float64(len(exact))
+}
