@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
 )
 
@@ -93,14 +94,50 @@ func TestGenerateBatchedRepairsMissingChunksWithThePerChunkPrompt(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if texts[chunks[0].ID] != "s1" || texts[chunks[2].ID] != "s3" {
+	if texts[chunks[0].ID].text != "s1" || texts[chunks[2].ID].text != "s3" {
 		t.Fatalf("batched texts missing: %v", texts)
 	}
-	if texts[chunks[1].ID] != "repaired" {
+	if texts[chunks[1].ID].text != "repaired" {
 		t.Fatalf("chunk 2 not repaired: %v", texts)
 	}
 	if prompts[len(prompts)-1] != "PER-CHUNK" {
 		t.Fatalf("repair must use the per-chunk prompt, got %q", prompts[len(prompts)-1])
+	}
+}
+
+func TestGenerateBatchedRejectsWrongRepairResultCount(t *testing.T) {
+	documents, chunks := batchedFixture(2)
+	generate := func(_ context.Context, requests []rag.GenerationRequest) ([]rag.GenerationResult, error) {
+		if requests[0].Prompt == "BATCHED" {
+			return []rag.GenerationResult{{Text: `[]`}}, nil
+		}
+		return []rag.GenerationResult{{Text: "only one"}}, nil
+	}
+	_, err := generateBatched(context.Background(), documents, chunks, generate, KindSummary,
+		BatchedSpec{Model: "glm", Prompt: "BATCHED", FallbackPrompt: "PER-CHUNK"}, false)
+	if err == nil || !strings.Contains(err.Error(), "repair returned 1 results for 2 chunks") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRepairedRepresentationUsesFallbackPromptDigest(t *testing.T) {
+	documents, chunks := batchedFixture(2)
+	generate := func(_ context.Context, requests []rag.GenerationRequest) ([]rag.GenerationResult, error) {
+		if requests[0].Prompt == "BATCHED" {
+			return []rag.GenerationResult{{Text: `[{"chunk":1,"text":"batched"}]`}}, nil
+		}
+		return []rag.GenerationResult{{Text: "repaired"}}, nil
+	}
+	reps, err := GeneratedSummariesBatched(context.Background(), documents, chunks, generate,
+		BatchedSpec{Model: "glm", Prompt: "BATCHED", FallbackPrompt: "PER-CHUNK"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reps[0].PromptDigest != digest.Text("BATCHED") {
+		t.Fatalf("batched prompt digest = %q", reps[0].PromptDigest)
+	}
+	if reps[1].PromptDigest != digest.Text("PER-CHUNK") {
+		t.Fatalf("repair prompt digest = %q", reps[1].PromptDigest)
 	}
 }
 

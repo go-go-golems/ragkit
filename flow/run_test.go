@@ -327,6 +327,49 @@ func TestRunPreflightMonetaryGate(t *testing.T) {
 	require.Contains(t, err.Error(), "pricing unavailable for unpriced-calls")
 }
 
+func TestRunSharedPreflightKeepsRefusingUnpricedPlan(t *testing.T) {
+	var calls atomic.Int64
+	step := doubler("unpriced", Policy{
+		Admission: []Resource{{Name: "unpriced-calls", Ceiling: 1, Budget: 1}},
+	})
+	base := step.Do
+	step.Do = func(ctx context.Context, value int) (int, error) {
+		calls.Add(1)
+		return base(ctx, value)
+	}
+	options := Options{Preflight: &Preflight{MaxEstimatedUSD: 1}}.Share()
+
+	for range 2 {
+		_, _, err := Run(context.Background(), step, []int{1}, options)
+		require.ErrorContains(t, err, "pricing unavailable for unpriced-calls")
+	}
+	require.Zero(t, calls.Load())
+}
+
+func TestRunSharedResourcePlansCompareUnitPriceValues(t *testing.T) {
+	firstPrice := 0.02
+	secondPrice := 0.02
+	first := doubler("first", Policy{Admission: []Resource{{
+		Name: "priced-calls", Ceiling: 2, Budget: 2, UnitUSD: &firstPrice,
+	}}})
+	second := doubler("second", Policy{Admission: []Resource{{
+		Name: "priced-calls", Ceiling: 2, Budget: 2, UnitUSD: &secondPrice,
+	}}})
+	options := Options{Preflight: &Preflight{MaxEstimatedUSD: 1}}.Share()
+
+	_, _, err := Run(context.Background(), first, []int{1}, options)
+	require.NoError(t, err)
+	_, _, err = Run(context.Background(), second, []int{2}, options)
+	require.NoError(t, err)
+}
+
+func TestRetryDelayNeverExceedsCap(t *testing.T) {
+	for range 100 {
+		require.LessOrEqual(t, retryDelay(10*time.Millisecond, 10*time.Millisecond), 10*time.Millisecond)
+		require.LessOrEqual(t, retryDelay(20*time.Millisecond, 10*time.Millisecond), 10*time.Millisecond)
+	}
+}
+
 func TestRunBudgetRefusalMidRunIsFatalWithWording(t *testing.T) {
 	step := Step[int, int]{
 		Name: "budgeted",

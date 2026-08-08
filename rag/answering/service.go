@@ -247,7 +247,10 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 			return RetrievalResult{}, err
 		}
 	case StrategyMultiQuery:
-		variants, variantErr := s.generateVariants(ctx, state, query, variantCount(request.Config))
+		variants, variantErr, err := s.generateVariants(ctx, state, query, variantCount(request.Config))
+		if err != nil {
+			return RetrievalResult{}, err
+		}
 		result.Variants, result.VariantError = variants, variantErr
 		// The fallback rule: reformulation failure degrades to the plain
 		// question, never to a failed turn. The record says what degraded.
@@ -271,7 +274,10 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 		}
 		result.Fused = fused
 	case StrategyHyDE:
-		hypothetical, variantErr := s.generateHypothetical(ctx, state, query)
+		hypothetical, variantErr, err := s.generateHypothetical(ctx, state, query)
+		if err != nil {
+			return RetrievalResult{}, err
+		}
 		result.VariantError = variantErr
 		vectorQuery := query
 		if hypothetical != "" {
@@ -520,17 +526,17 @@ func (s *Service) fuseChannels(
 }
 
 // generateVariants asks the generator for query reformulations under a strict
-// JSON contract. Failure is reported, never fatal: the caller falls back to
-// the plain question and the record carries the reason.
+// JSON contract. Generation and contract failures are reported as fallback
+// details; observer failures remain operational errors and stop the turn.
 func (s *Service) generateVariants(
 	ctx context.Context,
 	state *observationState,
 	query rag.Query,
 	count int,
-) ([]string, string) {
+) ([]string, string, error) {
 	started := time.Now()
 	if err := state.emit(ctx, StageQueryGen, ObservationStarted, started, 0, nil, ""); err != nil {
-		return nil, err.Error()
+		return nil, "", err
 	}
 	format := s.MultiQueryPrompt
 	if format == "" {
@@ -544,7 +550,7 @@ func (s *Service) generateVariants(
 	if err != nil {
 		message := err.Error()
 		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return nil, message
+		return nil, message, nil
 	}
 	var parsed struct {
 		Variants []string `json:"variants"`
@@ -552,7 +558,7 @@ func (s *Service) generateVariants(
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw.Text)), &parsed); err != nil {
 		message := "decode variants: " + err.Error()
 		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return nil, message
+		return nil, message, nil
 	}
 	variants := make([]string, 0, count)
 	for _, variant := range parsed.Variants {
@@ -568,12 +574,12 @@ func (s *Service) generateVariants(
 	if len(variants) == 0 {
 		message := "the generator returned no usable variants"
 		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return nil, message
+		return nil, message, nil
 	}
 	if err := state.emit(ctx, StageQueryGen, ObservationCompleted, started, time.Since(started), variants, ""); err != nil {
-		return variants, err.Error()
+		return nil, "", err
 	}
-	return variants, ""
+	return variants, "", nil
 }
 
 // generateHypothetical asks the generator for a hypothetical answer whose
@@ -582,10 +588,10 @@ func (s *Service) generateHypothetical(
 	ctx context.Context,
 	state *observationState,
 	query rag.Query,
-) (string, string) {
+) (string, string, error) {
 	started := time.Now()
 	if err := state.emit(ctx, StageQueryGen, ObservationStarted, started, 0, nil, ""); err != nil {
-		return "", err.Error()
+		return "", "", err
 	}
 	hydePrompt := s.HyDEPrompt
 	if hydePrompt == "" {
@@ -599,18 +605,18 @@ func (s *Service) generateHypothetical(
 	if err != nil {
 		message := err.Error()
 		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return "", message
+		return "", message, nil
 	}
 	hypothetical := strings.TrimSpace(raw.Text)
 	if hypothetical == "" {
 		message := "the generator returned an empty hypothetical answer"
 		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return "", message
+		return "", message, nil
 	}
 	if err := state.emit(ctx, StageQueryGen, ObservationCompleted, started, time.Since(started), hypothetical, ""); err != nil {
-		return hypothetical, err.Error()
+		return "", "", err
 	}
-	return hypothetical, ""
+	return hypothetical, "", nil
 }
 
 func (s *Service) contractKind() string {

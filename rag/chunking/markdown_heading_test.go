@@ -102,6 +102,28 @@ func TestMarkdownHeadingMergesSmallSections(t *testing.T) {
 	}
 }
 
+func TestMarkdownHeadingMergesInteriorSmallSectionForward(t *testing.T) {
+	t.Parallel()
+	first := "# First\n" + strings.Repeat("a", 250) + "\n"
+	tiny := "# Tiny\nshort\n"
+	third := "# Third\n" + strings.Repeat("b", 250) + "\n"
+	text := first + tiny + third
+	document := rag.Document{ID: "doc", Text: text, ContentDigest: digest.Text(text)}
+
+	chunks, err := (&MarkdownHeading{
+		MaxSectionRunes: 1200, MinSectionRunes: 100, OverlapRunes: 120,
+	}).Chunk(context.Background(), document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("chunks = %d, want 2", len(chunks))
+	}
+	if strings.Contains(chunks[0].Text, "# Tiny") || !strings.HasPrefix(chunks[1].Text, "# Tiny") || !strings.Contains(chunks[1].Text, "# Third") {
+		t.Fatalf("interior tiny section did not merge forward: %#v", chunks)
+	}
+}
+
 // TestMarkdownHeadingNameIncludesParameters guards the stable identity used in
 // bundle manifests and reports.
 func TestMarkdownHeadingNameIncludesParameters(t *testing.T) {

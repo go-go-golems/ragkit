@@ -25,9 +25,10 @@ func (generator *scriptedGenerator) Generate(_ context.Context, request rag.Gene
 		return rag.GenerationResult{}, generator.fail
 	}
 	tokens := int64(7)
+	reasoningTokens := int64(3)
 	return rag.GenerationResult{
 		Text:  generator.text,
-		Usage: rag.Usage{OutputTokens: &tokens},
+		Usage: rag.Usage{OutputTokens: &tokens, ReasoningTokens: &reasoningTokens},
 	}, nil
 }
 
@@ -123,11 +124,18 @@ func TestFlowStepMetersFreshUsageOnly(t *testing.T) {
 
 	_, report, err := flow.Run(context.Background(), step, []rag.GenerationRequest{request}, flow.Options{Store: cache})
 	require.NoError(t, err)
-	require.Equal(t, flow.Meters{"output_tokens": 7}, report.Step("metered").Meters)
+	require.Equal(t, flow.Meters{"output_tokens": 7, "reasoning_tokens": 3}, report.Step("metered").Meters)
 
 	_, report, err = flow.Run(context.Background(), step, []rag.GenerationRequest{request}, flow.Options{Store: cache})
 	require.NoError(t, err)
 	require.Nil(t, report.Step("metered").Meters, "cached usage is not this run's spend")
+}
+
+func TestUsageMetersRoundTripsReasoningTokens(t *testing.T) {
+	reasoningTokens := int64(13)
+	usage := UsageFromMeters(UsageMeters(rag.Usage{ReasoningTokens: &reasoningTokens}))
+	require.NotNil(t, usage.ReasoningTokens)
+	require.Equal(t, reasoningTokens, *usage.ReasoningTokens)
 }
 
 func TestFlowStepValidatesOptionsLikeTheLegacyPath(t *testing.T) {

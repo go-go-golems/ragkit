@@ -176,7 +176,7 @@ func decideAdmission(repository, commit, path string, body []byte, policy Policy
 		admission.Reason = "vendor"
 	case int64(len(body)) > policy.MaximumFileBytes:
 		admission.Reason = "file-too-large"
-	case strings.Contains(path, "/testdata/") && int64(len(body)) > policy.MaximumTestdataBytes:
+	case (strings.HasPrefix(path, "testdata/") || strings.Contains(path, "/testdata/")) && int64(len(body)) > policy.MaximumTestdataBytes:
 		admission.Reason = "testdata-too-large"
 	case !policy.IncludeGenerated && IsGenerated(string(body)):
 		admission.Reason = "generated"

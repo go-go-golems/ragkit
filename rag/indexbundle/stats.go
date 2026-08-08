@@ -469,11 +469,13 @@ func percentiles(runeCounts []int, wanted []int) map[int]int {
 	copy(sorted, runeCounts)
 	sort.Ints(sorted)
 	for _, percentile := range wanted {
-		rank := percentile * len(sorted) / 100
-		if rank >= len(sorted) {
-			rank = len(sorted) - 1
+		rank := (percentile*len(sorted) + 99) / 100
+		if rank < 1 {
+			rank = 1
+		} else if rank > len(sorted) {
+			rank = len(sorted)
 		}
-		result[percentile] = sorted[rank]
+		result[percentile] = sorted[rank-1]
 	}
 	return result
 }

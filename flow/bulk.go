@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -222,7 +221,7 @@ func runBulk[I, O any](
 		var lastClass ErrorClass
 		for attempt := 1; attempt <= attempts; attempt++ {
 			if attempt > 1 {
-				jittered := delay + time.Duration(rand.Int63n(int64(delay)/2+1))
+				jittered := retryDelay(delay, backoff.Cap)
 				select {
 				case <-ctx.Done():
 					return struct{}{}, ctx.Err()
@@ -297,6 +296,7 @@ func runBulk[I, O any](
 		for position, group := range current.groups {
 			value := values[position]
 			outcome := execution.CacheOutcome{}
+			eventType := EventDone
 			if cached {
 				// Commit each result even if a sibling batch just canceled
 				// the run: completed provider work stays recoverable.
@@ -305,6 +305,7 @@ func runBulk[I, O any](
 				}
 				count(func(counts *StepReport) { counts.Stored++ })
 				outcome = execution.CacheOutcome{KeyDigest: group.digest, State: execution.CacheStored}
+				eventType = EventStored
 			}
 			if s.Meter != nil {
 				metered := s.Meter(value)
@@ -319,7 +320,7 @@ func runBulk[I, O any](
 			mutex.Unlock()
 			for _, index := range group.indexes {
 				if o.Ledger != nil {
-					if err := o.Ledger.Event(ctx, Event{Step: s.Name, Index: index, Type: EventStored}); err != nil {
+					if err := o.Ledger.Event(ctx, Event{Step: s.Name, Index: index, Type: eventType}); err != nil {
 						return struct{}{}, fmt.Errorf("step %q: ledger event: %w", s.Name, err)
 					}
 				}

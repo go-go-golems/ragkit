@@ -114,6 +114,11 @@ type batchedEntry struct {
 	Text  string `json:"text"`
 }
 
+type generatedText struct {
+	text   string
+	prompt string
+}
+
 // parseBatchedResponse extracts the JSON array from a response, tolerating
 // code fences and prose around it. Entries with out-of-range numbers or empty
 // text are dropped; the caller repairs whatever is missing.
@@ -155,7 +160,7 @@ func generateBatched(
 	kind string,
 	spec BatchedSpec,
 	contextual bool,
-) (map[string]string, error) {
+) (map[string]generatedText, error) {
 	if generate == nil {
 		return nil, errors.Errorf("the batched %s builder needs a generation function", kind)
 	}
@@ -177,14 +182,14 @@ func generateBatched(
 	if len(results) != len(groups) {
 		return nil, errors.Errorf("batched %s generation returned %d results for %d groups", kind, len(results), len(groups))
 	}
-	texts := make(map[string]string, len(chunks))
+	texts := make(map[string]generatedText, len(chunks))
 	missing := make([]rag.Chunk, 0)
 	missingDocs := make([]rag.Document, 0)
 	for i, group := range groups {
 		parsed := parseBatchedResponse(results[i].Text, len(group.chunks))
 		for index, chunk := range group.chunks {
 			if text, ok := parsed[index+1]; ok {
-				texts[chunk.ID] = text
+				texts[chunk.ID] = generatedText{text: text, prompt: spec.Prompt}
 			} else {
 				missing = append(missing, chunk)
 				missingDocs = append(missingDocs, group.document)
@@ -210,9 +215,12 @@ func generateBatched(
 	if err != nil {
 		return nil, errors.Wrapf(err, "repair %d missing batched %s representations", len(missing), kind)
 	}
+	if len(repaired) != len(missing) {
+		return nil, errors.Errorf("batched %s repair returned %d results for %d chunks", kind, len(repaired), len(missing))
+	}
 	for i, chunk := range missing {
 		if text := strings.TrimSpace(repaired[i].Text); text != "" {
-			texts[chunk.ID] = text
+			texts[chunk.ID] = generatedText{text: text, prompt: spec.FallbackPrompt}
 		}
 	}
 	return texts, nil
@@ -233,15 +241,15 @@ func ContextualBatched(
 	}
 	reps := make([]rag.Representation, 0, len(chunks))
 	for _, chunk := range chunks {
-		blurb, ok := texts[chunk.ID]
+		generatedText, ok := texts[chunk.ID]
 		if !ok {
 			continue
 		}
-		text := blurb
+		text := generatedText.text
 		if includeChunkBody {
-			text = blurb + "\n" + chunk.Text
+			text = generatedText.text + "\n" + chunk.Text
 		}
-		rep, err := generated(chunk, KindContextual, text, spec.Model, spec.Prompt)
+		rep, err := generated(chunk, KindContextual, text, spec.Model, generatedText.prompt)
 		if err != nil {
 			return nil, err
 		}
@@ -264,11 +272,11 @@ func GeneratedSummariesBatched(
 	}
 	reps := make([]rag.Representation, 0, len(chunks))
 	for _, chunk := range chunks {
-		text, ok := texts[chunk.ID]
+		generatedText, ok := texts[chunk.ID]
 		if !ok {
 			continue
 		}
-		rep, err := generated(chunk, KindSummary, text, spec.Model, spec.Prompt)
+		rep, err := generated(chunk, KindSummary, generatedText.text, spec.Model, generatedText.prompt)
 		if err != nil {
 			return nil, err
 		}
@@ -292,8 +300,9 @@ func GeneratedQuestionsBatched(
 	}
 	reps := make([]rag.Representation, 0, len(chunks)*3)
 	for _, chunk := range chunks {
-		for _, question := range ParseQuestionLines(texts[chunk.ID]) {
-			rep, err := generated(chunk, KindQuestion, question, spec.Model, spec.Prompt)
+		generatedText := texts[chunk.ID]
+		for _, question := range ParseQuestionLines(generatedText.text) {
+			rep, err := generated(chunk, KindQuestion, question, spec.Model, generatedText.prompt)
 			if err != nil {
 				return nil, err
 			}
@@ -328,8 +337,9 @@ func GeneratedStatementsBatched(
 	}
 	reps := make([]rag.Representation, 0, len(chunks)*3)
 	for _, chunk := range chunks {
-		for _, statement := range ParseQuestionLines(texts[chunk.ID]) {
-			rep, err := generated(chunk, KindStatement, statement, spec.Model, spec.Prompt)
+		generatedText := texts[chunk.ID]
+		for _, statement := range ParseQuestionLines(generatedText.text) {
+			rep, err := generated(chunk, KindStatement, statement, spec.Model, generatedText.prompt)
 			if err != nil {
 				return nil, err
 			}
@@ -353,11 +363,12 @@ func EntityExpansionsBatched(
 	}
 	reps := make([]rag.Representation, 0, len(chunks))
 	for _, chunk := range chunks {
-		line := collapseLine(texts[chunk.ID])
+		generatedText := texts[chunk.ID]
+		line := collapseLine(generatedText.text)
 		if line == "" {
 			continue
 		}
-		rep, err := generated(chunk, KindEntities, chunk.Text+"\n"+line, spec.Model, spec.Prompt)
+		rep, err := generated(chunk, KindEntities, chunk.Text+"\n"+line, spec.Model, generatedText.prompt)
 		if err != nil {
 			return nil, err
 		}

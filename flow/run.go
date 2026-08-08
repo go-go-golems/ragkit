@@ -142,7 +142,6 @@ func newRunEnv(rates map[string]execution.Limiter, gate *Preflight) *runEnv {
 func (env *runEnv) ensure(plans []stagePlan) error {
 	env.mutex.Lock()
 	defer env.mutex.Unlock()
-	var unpriced []string
 	for _, plan := range plans {
 		name := plan.resource.Name
 		if strings.TrimSpace(name) == "" {
@@ -153,7 +152,7 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 		if existing, ok := env.plans[name]; ok {
 			// A zero-valued Resource{Name: ...} is a reference to an earlier
 			// full declaration: the step draws from that budget.
-			if reference || existing == converted {
+			if reference || resourcePlansEqual(existing, converted) {
 				continue
 			}
 			return fmt.Errorf(
@@ -181,7 +180,6 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 		}
 		if plan.resource.Ceiling > 0 {
 			if plan.resource.UnitUSD == nil {
-				unpriced = append(unpriced, name)
 				env.unpriced = append(env.unpriced, name)
 			} else {
 				env.estimatedUSD += float64(plan.resource.Ceiling) * *plan.resource.UnitUSD
@@ -204,8 +202,8 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 			Msg("flow resource plan admitted")
 	}
 	if env.gate != nil {
-		if len(unpriced) > 0 && !env.gate.AllowUnpriced {
-			return fmt.Errorf("preflight refused the plans: pricing unavailable for %s", strings.Join(unpriced, ", "))
+		if len(env.unpriced) > 0 && !env.gate.AllowUnpriced {
+			return fmt.Errorf("preflight refused the plans: pricing unavailable for %s", strings.Join(env.unpriced, ", "))
 		}
 		if env.estimatedUSD > env.gate.MaxEstimatedUSD {
 			return fmt.Errorf(
@@ -215,6 +213,27 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 		}
 	}
 	return nil
+}
+
+func resourcePlansEqual(left, right execution.ResourcePlan) bool {
+	if left.Name != right.Name || left.Ceiling != right.Ceiling || left.Budget != right.Budget {
+		return false
+	}
+	if left.UnitUSD == nil || right.UnitUSD == nil {
+		return left.UnitUSD == nil && right.UnitUSD == nil
+	}
+	return *left.UnitUSD == *right.UnitUSD
+}
+
+func retryDelay(delay, cap time.Duration) time.Duration {
+	if delay > cap {
+		delay = cap
+	}
+	jittered := delay + time.Duration(rand.Int63n(int64(delay)/2+1))
+	if jittered > cap {
+		return cap
+	}
+	return jittered
 }
 
 func (env *runEnv) limiter(name string) execution.Limiter {
@@ -844,7 +863,7 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 	var lastClass ErrorClass
 	for attempt := 1; attempt <= runner.attempts; attempt++ {
 		if attempt > 1 {
-			jittered := delay + time.Duration(rand.Int63n(int64(delay)/2+1))
+			jittered := retryDelay(delay, runner.backoff.Cap)
 			select {
 			case <-ctx.Done():
 				return erasedItem{}, ctx.Err()

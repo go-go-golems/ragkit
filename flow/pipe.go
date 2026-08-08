@@ -14,7 +14,7 @@ package flow
 func Pipe2[A, B, C any](s1 Step[A, B], s2 Step[B, C]) Step[A, C] {
 	return Step[A, C]{
 		Name:   pipeName(s1.Name, s2.Name),
-		stages: append(stagesOf(s1), stagesOf(s2)...),
+		stages: combineStages(stagesOf(s1), stagesOf(s2)),
 	}
 }
 
@@ -22,19 +22,28 @@ func Pipe2[A, B, C any](s1 Step[A, B], s2 Step[B, C]) Step[A, C] {
 func Pipe3[A, B, C, D any](s1 Step[A, B], s2 Step[B, C], s3 Step[C, D]) Step[A, D] {
 	return Step[A, D]{
 		Name:   pipeName(s1.Name, s2.Name, s3.Name),
-		stages: append(append(stagesOf(s1), stagesOf(s2)...), stagesOf(s3)...),
+		stages: combineStages(stagesOf(s1), stagesOf(s2), stagesOf(s3)),
 	}
 }
 
 // Pipe4 composes four steps.
 func Pipe4[A, B, C, D, E any](s1 Step[A, B], s2 Step[B, C], s3 Step[C, D], s4 Step[D, E]) Step[A, E] {
 	return Step[A, E]{
-		Name: pipeName(s1.Name, s2.Name, s3.Name, s4.Name),
-		stages: append(
-			append(append(stagesOf(s1), stagesOf(s2)...), stagesOf(s3)...),
-			stagesOf(s4)...,
-		),
+		Name:   pipeName(s1.Name, s2.Name, s3.Name, s4.Name),
+		stages: combineStages(stagesOf(s1), stagesOf(s2), stagesOf(s3), stagesOf(s4)),
 	}
+}
+
+func combineStages(groups ...[]stageSpec) []stageSpec {
+	total := 0
+	for _, group := range groups {
+		total += len(group)
+	}
+	combined := make([]stageSpec, 0, total)
+	for _, group := range groups {
+		combined = append(combined, group...)
+	}
+	return combined
 }
 
 func pipeName(names ...string) string {

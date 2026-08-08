@@ -248,7 +248,7 @@ func TestPercentilesReportAValueSomeChunkHas(t *testing.T) {
 		)
 	}
 	require.Equal(t, 300, statistics.Percentiles[25])
-	require.Equal(t, 600, statistics.Percentiles[50])
+	require.Equal(t, 500, statistics.Percentiles[50])
 	require.Equal(t, 1000, statistics.Percentiles[95])
 }
 
