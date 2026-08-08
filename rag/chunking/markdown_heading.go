@@ -157,25 +157,28 @@ func mergeSmallSections(sections []section, minRunes int, text string) []section
 		return sections
 	}
 	merged := make([]section, 0, len(sections))
-	for _, s := range sections {
-		if len(merged) == 0 {
-			merged = append(merged, s)
+	var pending *section
+	for index, current := range sections {
+		currentRunes := len([]rune(text[current.start:current.end]))
+		if currentRunes < minRunes && index < len(sections)-1 {
+			if pending == nil {
+				copy := current
+				pending = &copy
+			} else {
+				pending.end = current.end
+			}
 			continue
 		}
-		last := &merged[len(merged)-1]
-		lastRunes := len([]rune(text[last.start:last.end]))
-		currentRunes := len([]rune(text[s.start:s.end]))
-		// Merge when the running section is still under the floor, or when the
-		// current section alone is under the floor. Either way the result is one
-		// section that clears the floor unless the document is itself tiny.
-		if lastRunes < minRunes || currentRunes < minRunes {
-			last.end = s.end
+		if pending != nil {
+			current.start = pending.start
+			pending = nil
+		}
+		if currentRunes < minRunes && index == len(sections)-1 && len(merged) > 0 {
+			merged[len(merged)-1].end = current.end
 			continue
 		}
-		merged = append(merged, s)
+		merged = append(merged, current)
 	}
-	// A trailing section that never reached the floor was already merged into
-	// its predecessor by the loop above; nothing more to do.
 	return merged
 }
 

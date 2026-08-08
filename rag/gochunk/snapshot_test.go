@@ -48,6 +48,16 @@ func TestLoadCommittedIgnoresDirtyWorktreeAndGeneratedFiles(t *testing.T) {
 		t.Fatalf("snapshot = %#v", result.Snapshot)
 	}
 }
+
+func TestDecideAdmissionAppliesTestdataLimitAtRepositoryRoot(t *testing.T) {
+	policy := Policy{MaximumFileBytes: 100, MaximumTestdataBytes: 4}
+	for _, path := range []string{"testdata/large.go", "pkg/testdata/large.go"} {
+		admission := decideAdmission("repo", "commit", path, []byte("12345"), policy)
+		if admission.Admitted || admission.Reason != "testdata-too-large" {
+			t.Fatalf("%s admission = %#v", path, admission)
+		}
+	}
+}
 func writeFixture(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

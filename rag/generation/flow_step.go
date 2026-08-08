@@ -96,6 +96,9 @@ func UsageMeters(usage rag.Usage) flow.Meters {
 	if usage.OutputTokens != nil {
 		meters["output_tokens"] = float64(*usage.OutputTokens)
 	}
+	if usage.ReasoningTokens != nil {
+		meters["reasoning_tokens"] = float64(*usage.ReasoningTokens)
+	}
 	if usage.EmbeddingTokens != nil {
 		meters["embedding_tokens"] = float64(*usage.EmbeddingTokens)
 	}

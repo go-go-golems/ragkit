@@ -42,6 +42,7 @@ func UsageFromMeters(meters flow.Meters) rag.Usage {
 	setInt(&usage.InputTokens, "input_tokens")
 	setInt(&usage.CachedInputTokens, "cached_input_tokens")
 	setInt(&usage.OutputTokens, "output_tokens")
+	setInt(&usage.ReasoningTokens, "reasoning_tokens")
 	setInt(&usage.EmbeddingTokens, "embedding_tokens")
 	if value, ok := meters["cost_usd"]; ok {
 		usage.CostUSD = &value

@@ -2,6 +2,7 @@ package answering
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -100,4 +101,27 @@ func TestHyDEFallsBackToTheQuestionOnEmptyGeneration(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, result.VariantError, "empty hypothetical")
 	require.Equal(t, "question", vector.queries[0].Text)
+}
+
+func TestQueryGenerationObserverFailureStopsRetrieval(t *testing.T) {
+	for _, strategy := range []Strategy{StrategyMultiQuery, StrategyHyDE} {
+		t.Run(string(strategy), func(t *testing.T) {
+			generated := `{"variants":["variant"]}`
+			if strategy == StrategyHyDE {
+				generated = "hypothetical answer"
+			}
+			service, lexical, vector := querygenFixture(generated, nil)
+			service.Observer = func(_ context.Context, observation Observation) error {
+				if observation.Stage == StageQueryGen && observation.Status == ObservationCompleted {
+					return errors.New("observer unavailable")
+				}
+				return nil
+			}
+
+			_, err := service.Retrieve(context.Background(), requestFixture(strategy))
+			require.ErrorContains(t, err, "observer unavailable")
+			require.Empty(t, lexical.queries)
+			require.Empty(t, vector.queries)
+		})
+	}
 }

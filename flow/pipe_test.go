@@ -168,6 +168,29 @@ func TestPipe3FlattensAndOrdersResults(t *testing.T) {
 	require.Equal(t, 4, report.Step("p3-third").Items)
 }
 
+func TestPipeCompositionDoesNotMutateSharedPrefix(t *testing.T) {
+	first := doubler("first", Policy{})
+	second := doubler("second", Policy{})
+	third := doubler("third", Policy{})
+	fourth := doubler("fourth", Policy{})
+	prefix := Pipe3(first, second, third)
+
+	left := Pipe2(prefix, fourth)
+	right := Pipe2(prefix, first)
+
+	require.Equal(t, []string{"first", "second", "third", "fourth"}, stageNames(left.stages))
+	require.Equal(t, []string{"first", "second", "third", "first"}, stageNames(right.stages))
+	require.Equal(t, []string{"first", "second", "third"}, stageNames(prefix.stages))
+}
+
+func stageNames(stages []stageSpec) []string {
+	names := make([]string, len(stages))
+	for index, stage := range stages {
+		names[index] = stage.name
+	}
+	return names
+}
+
 func TestPipeStageFailureFailsRunWithStageName(t *testing.T) {
 	first := doubler("ok-stage", Policy{})
 	second := Step[int, int]{

@@ -83,6 +83,17 @@ func TestBulkBatchesMissesAndCachesPerItem(t *testing.T) {
 	require.Equal(t, 2, report.Step("embed").Misses)
 }
 
+func TestBulkUncachedResultsEmitDone(t *testing.T) {
+	ledger := &recordingLedger{}
+	step := Bulk(bulkStep("uncached"), doubleAll(nil, nil, nil), 2)
+	step.Identity = Identity[int]{}
+
+	_, _, err := Run(context.Background(), step, []int{1, 2}, Options{Ledger: ledger})
+	require.NoError(t, err)
+	require.Len(t, ledger.byType(EventDone), 2)
+	require.Empty(t, ledger.byType(EventStored))
+}
+
 func TestBulkDeduplicatesKeysAndChargesUniqueMisses(t *testing.T) {
 	budget := Resource{Name: "embed-items", Ceiling: 2, Budget: 2}
 	base := bulkStep("dedup-bulk")

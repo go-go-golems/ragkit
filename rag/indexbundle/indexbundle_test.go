@@ -2,14 +2,18 @@ package indexbundle
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	blevelib "github.com/blevesearch/bleve/v2"
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/go-go-golems/ragkit/rag/chunking"
 	"github.com/go-go-golems/ragkit/rag/embedding"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -200,4 +204,70 @@ func TestOpenRejectsEmbeddingAndManifestMismatches(t *testing.T) {
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.ErrorContains(t, err, "counts differ")
+}
+
+func TestOpenValidatesChunkDigestWithoutRawRepresentations(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	input.Representations[0].Kind = "summary"
+	input.Representations[0].Text = "generated summary"
+	input.Representations[0].ContentDigest = digest.Text(input.Representations[0].Text)
+	result, err := Build(t.Context(), input)
+	require.NoError(t, err)
+
+	chunksPath := filepath.Join(result.Path, chunksName)
+	var chunks []rag.Chunk
+	require.NoError(t, readJSON(chunksPath, &chunks))
+	chunks[0].Text += " tampered"
+	data, err := json.Marshal(chunks)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(chunksPath, data, 0o600))
+
+	_, err = Open(t.Context(), OpenOptions{
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+	})
+	require.ErrorContains(t, err, "content digest mismatch")
+}
+
+func TestOpenRejectsPersistedBackendContentChanges(t *testing.T) {
+	t.Run("lexical", func(t *testing.T) {
+		input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+		result, err := Build(t.Context(), input)
+		require.NoError(t, err)
+		path := filepath.Join(result.Path, bleveName)
+		index, err := blevelib.Open(path)
+		require.NoError(t, err)
+		require.NoError(t, index.Index(input.Representations[0].ID, map[string]any{
+			"representation_id": input.Representations[0].ID,
+			"chunk_id":          input.Chunks[0].ID,
+			"document_id":       input.Documents[0].ID,
+			"kind":              input.Representations[0].Kind,
+			"title":             input.Documents[0].Title,
+			"body":              "different indexed body",
+		}))
+		require.NoError(t, index.Close())
+
+		_, err = Open(t.Context(), OpenOptions{
+			Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+			EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+		})
+		require.ErrorContains(t, err, "lexical content differs")
+	})
+
+	t.Run("vector", func(t *testing.T) {
+		input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+		result, err := Build(t.Context(), input)
+		require.NoError(t, err)
+		db, err := sql.Open("sqlite3", filepath.Join(result.Path, vectorName))
+		require.NoError(t, err)
+		_, err = db.Exec(`UPDATE embedding SET content_digest = 'different'`)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+
+		_, err = Open(t.Context(), OpenOptions{
+			Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+			EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+		})
+		require.ErrorContains(t, err, "vector identity differs")
+	})
 }

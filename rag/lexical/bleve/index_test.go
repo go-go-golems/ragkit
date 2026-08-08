@@ -58,11 +58,11 @@ func TestSearchOrdersTiesBeforeApplyingLimit(t *testing.T) {
 	representations := make([]rag.Representation, 0, count)
 	// Insert in descending identity order. All records have identical title and
 	// body statistics, producing an equal-score group larger than the cutoff.
-	// Representation IDs deliberately sort opposite to chunk IDs so the test
-	// proves that source identity controls the provider-side cutoff.
+	// Chunk IDs deliberately sort opposite to document IDs so the test proves
+	// that the complete HitRanksBefore identity controls the provider cutoff.
 	for index := count - 1; index >= 0; index-- {
-		representationID := fmt.Sprintf("rep-%02d", count-1-index)
-		chunkID := fmt.Sprintf("chunk-%02d", index)
+		representationID := fmt.Sprintf("rep-%02d", index)
+		chunkID := fmt.Sprintf("chunk-%02d", count-1-index)
 		documentID := fmt.Sprintf("doc-%02d", index)
 		documents = append(documents, rag.Document{ID: documentID, Title: "Tied title"})
 		chunks = append(chunks, rag.Chunk{ID: chunkID, DocumentID: documentID, Text: "identical token"})
@@ -87,8 +87,8 @@ func TestSearchOrdersTiesBeforeApplyingLimit(t *testing.T) {
 			t.Fatalf("hits = %d, want %d", len(hits), limit)
 		}
 		for position, hit := range hits {
-			wantChunk := fmt.Sprintf("chunk-%02d", position)
-			wantRepresentation := fmt.Sprintf("rep-%02d", count-1-position)
+			wantChunk := fmt.Sprintf("chunk-%02d", count-1-position)
+			wantRepresentation := fmt.Sprintf("rep-%02d", position)
 			if hit.ChunkID != wantChunk || hit.RepresentationID != wantRepresentation {
 				t.Fatalf("repetition %d rank %d = (%q, %q), want (%q, %q)", repetition, position+1, hit.ChunkID, hit.RepresentationID, wantChunk, wantRepresentation)
 			}

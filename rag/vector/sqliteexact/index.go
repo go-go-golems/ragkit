@@ -8,8 +8,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/internal/fsutil"
 	"github.com/go-go-golems/ragkit/rag"
 	vectorutil "github.com/go-go-golems/ragkit/vector"
@@ -29,6 +31,7 @@ type Manifest struct {
 	Model               string `json:"model"`
 	Dimensions          int    `json:"dimensions"`
 	RepresentationCount int    `json:"representation_count"`
+	ContentDigest       string `json:"content_digest"`
 }
 
 // Entry is one persisted vector and its retrieval identity. It is exposed so
@@ -39,6 +42,7 @@ type Entry struct {
 	ChunkID          string    `json:"chunk_id"`
 	DocumentID       string    `json:"document_id"`
 	Values           []float32 `json:"values"`
+	ContentDigest    string    `json:"content_digest"`
 }
 
 type Index struct {
@@ -211,38 +215,46 @@ func ReadEntries(ctx context.Context, path string) ([]Entry, Manifest, error) {
 	if err != nil {
 		return nil, Manifest{}, errors.Wrap(err, "inspect SQLite exact entries")
 	}
+	entries, err := readEntriesDB(ctx, db, manifest.RepresentationCount)
+	if err != nil {
+		return nil, Manifest{}, err
+	}
+	return entries, manifest, nil
+}
+
+func readEntriesDB(ctx context.Context, db *sql.DB, expected int) ([]Entry, error) {
 	rows, err := db.QueryContext(ctx, `
-SELECT representation_id, chunk_id, document_id, dimensions, values_blob
+SELECT representation_id, chunk_id, document_id, dimensions, values_blob, content_digest
 FROM embedding
 ORDER BY representation_id`)
 	if err != nil {
-		return nil, Manifest{}, errors.Wrap(err, "read SQLite exact entries")
+		return nil, errors.Wrap(err, "read SQLite exact entries")
 	}
 	defer func() { _ = rows.Close() }()
-	entries := make([]Entry, 0, manifest.RepresentationCount)
+	entries := make([]Entry, 0, expected)
 	for rows.Next() {
 		var entry Entry
 		var dimensions int
 		var blob []byte
-		if err := rows.Scan(&entry.RepresentationID, &entry.ChunkID, &entry.DocumentID, &dimensions, &blob); err != nil {
-			return nil, Manifest{}, errors.Wrap(err, "scan SQLite exact entry")
+		if err := rows.Scan(&entry.RepresentationID, &entry.ChunkID, &entry.DocumentID, &dimensions, &blob, &entry.ContentDigest); err != nil {
+			return nil, errors.Wrap(err, "scan SQLite exact entry")
 		}
 		entry.Values, err = decode(blob, dimensions)
 		if err != nil {
-			return nil, Manifest{}, errors.Wrapf(err, "decode SQLite exact entry %q", entry.RepresentationID)
+			return nil, errors.Wrapf(err, "decode SQLite exact entry %q", entry.RepresentationID)
 		}
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, Manifest{}, errors.Wrap(err, "iterate SQLite exact entries")
+		return nil, errors.Wrap(err, "iterate SQLite exact entries")
 	}
-	if len(entries) != manifest.RepresentationCount {
-		return nil, Manifest{}, errors.Errorf(
+	if len(entries) != expected {
+		return nil, errors.Errorf(
 			"read %d SQLite exact entries, expected %d",
-			len(entries), manifest.RepresentationCount,
+			len(entries), expected,
 		)
 	}
-	return entries, manifest, nil
+	return entries, nil
 }
 
 func inspectDB(db *sql.DB) (Manifest, error) {
@@ -272,7 +284,49 @@ SELECT COUNT(*) FROM (
 			"SQLite exact index contains %d model/dimension identities", groups,
 		)
 	}
+	entries, err := readEntriesDB(context.Background(), db, manifest.RepresentationCount)
+	if err != nil {
+		return Manifest{}, err
+	}
+	manifest.ContentDigest, err = digest.JSON(entries)
+	if err != nil {
+		return Manifest{}, errors.Wrap(err, "digest SQLite exact entries")
+	}
 	return manifest, nil
+}
+
+// CalculateContentDigest returns the canonical digest of the logical rows
+// that Build will persist. The bundle manifest uses it to reject a replaced
+// database even when model, dimensions, and row count still match.
+func CalculateContentDigest(representations []rag.Representation, chunks []rag.Chunk, vectors []rag.Vector) (string, error) {
+	representationByID := make(map[string]rag.Representation, len(representations))
+	for _, representation := range representations {
+		representationByID[representation.ID] = representation
+	}
+	chunkByID := make(map[string]rag.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		chunkByID[chunk.ID] = chunk
+	}
+	entries := make([]Entry, 0, len(vectors))
+	for _, vector := range vectors {
+		representation, ok := representationByID[vector.RepresentationID]
+		if !ok {
+			return "", errors.Errorf("vector references unknown representation %q", vector.RepresentationID)
+		}
+		chunk, ok := chunkByID[representation.ChunkID]
+		if !ok {
+			return "", errors.Errorf("representation references unknown chunk %q", representation.ChunkID)
+		}
+		entries = append(entries, Entry{
+			RepresentationID: representation.ID,
+			ChunkID:          chunk.ID,
+			DocumentID:       chunk.DocumentID,
+			Values:           append([]float32(nil), vector.Values...),
+			ContentDigest:    representation.ContentDigest,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].RepresentationID < entries[j].RepresentationID })
+	return digest.JSON(entries)
 }
 
 func (i *Index) Search(ctx context.Context, query rag.Query, limit int) ([]rag.Hit, error) {

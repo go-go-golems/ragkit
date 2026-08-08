@@ -30,14 +30,29 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		Backend: "bleve-bm25", Version: bleveindex.ManifestVersion, Channel: "bm25",
 		TitleBoost: 2, BodyBoost: 1,
 	}
+	lexicalDigest, err := bleveindex.CalculateContentDigest(
+		input.Documents, input.Chunks, input.Representations,
+	)
+	if err != nil {
+		return BuildResult{}, errors.Wrap(err, "digest bundle lexical content")
+	}
+	lexicalTemplate.ContentDigest = lexicalDigest
+	vectorIdentity := cloneVectorIdentity(input.Embedding)
+	if vectorIdentity != nil {
+		vectorIdentity.ContentDigest, err = sqliteexact.CalculateContentDigest(
+			input.Representations, input.Chunks, input.Vectors,
+		)
+		if err != nil {
+			return BuildResult{}, errors.Wrap(err, "digest bundle vector content")
+		}
+	}
 	bundleID, corpusDigest, representationDigest, kinds, err := CalculateID(
 		input.Documents, input.Representations, input.Chunker,
-		lexicalTemplate, input.Embedding,
+		lexicalTemplate, vectorIdentity,
 	)
 	if err != nil {
 		return BuildResult{}, err
 	}
-	vectorIdentity := cloneVectorIdentity(input.Embedding)
 	if vectorIdentity != nil {
 		vectorIdentity.RepresentationDigest = representationDigest
 	}
@@ -97,6 +112,9 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		return BuildResult{}, errors.Wrap(err, "close bundle lexical index")
 	}
 	manifest.Lexical = lexicalIdentity(lexicalManifest)
+	if manifest.Lexical.ContentDigest != lexicalTemplate.ContentDigest {
+		return BuildResult{}, errors.New("built lexical content digest differs from planned identity")
+	}
 	if vectorIdentity != nil {
 		vector, vectorErr := sqliteexact.Build(ctx, sqliteexact.Config{
 			Path:  filepath.Join(temporary, vectorName),
@@ -107,6 +125,13 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		}
 		if err := vector.Close(); err != nil {
 			return BuildResult{}, errors.Wrap(err, "close bundle vector index")
+		}
+		persisted, inspectErr := sqliteexact.Inspect(filepath.Join(temporary, vectorName))
+		if inspectErr != nil {
+			return BuildResult{}, errors.Wrap(inspectErr, "inspect built bundle vector index")
+		}
+		if persisted.ContentDigest != vectorIdentity.ContentDigest {
+			return BuildResult{}, errors.New("built vector content digest differs from planned identity")
 		}
 	}
 	if err := writeJSON(ctx, filepath.Join(temporary, manifestName), manifest); err != nil {

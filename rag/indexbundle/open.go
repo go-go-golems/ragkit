@@ -129,6 +129,9 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 		if chunk.ID == "" || chunk.DocumentID == "" || chunk.ContentDigest == "" {
 			return bundleData{}, errors.New("bundle contains an invalid chunk identity")
 		}
+		if digest.Text(chunk.Text) != chunk.ContentDigest {
+			return bundleData{}, errors.Errorf("bundle chunk %q content digest mismatch", chunk.ID)
+		}
 		if _, duplicate := chunkByID[chunk.ID]; duplicate {
 			return bundleData{}, errors.Errorf("bundle contains duplicate chunk %q", chunk.ID)
 		}
@@ -172,6 +175,13 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 		lexicalManifest.RepresentationCount != manifest.RepresentationCount {
 		return bundleData{}, errors.New("bundle lexical identity differs from manifest")
 	}
+	lexicalDigest, err := bleveindex.InspectContentDigest(filepath.Join(path, bleveName))
+	if err != nil {
+		return bundleData{}, errors.Wrap(err, "inspect bundle lexical content")
+	}
+	if lexicalDigest != manifest.Lexical.ContentDigest {
+		return bundleData{}, errors.New("bundle lexical content differs from manifest")
+	}
 	if manifest.Vector != nil {
 		vectorManifest, err := sqliteexact.Inspect(filepath.Join(path, vectorName))
 		if err != nil {
@@ -179,7 +189,8 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 		}
 		if vectorManifest.Model != manifest.Vector.Model ||
 			vectorManifest.Dimensions != manifest.Vector.Dimensions ||
-			vectorManifest.RepresentationCount != manifest.RepresentationCount {
+			vectorManifest.RepresentationCount != manifest.RepresentationCount ||
+			vectorManifest.ContentDigest != manifest.Vector.ContentDigest {
 			return bundleData{}, errors.New("bundle vector identity differs from manifest")
 		}
 	}

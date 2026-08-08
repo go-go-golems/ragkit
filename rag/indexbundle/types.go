@@ -20,11 +20,12 @@ type ChunkerIdentity struct {
 }
 
 type BackendIdentity struct {
-	Backend    string  `json:"backend"`
-	Version    int     `json:"version"`
-	Channel    string  `json:"channel"`
-	TitleBoost float64 `json:"title_boost,omitempty"`
-	BodyBoost  float64 `json:"body_boost,omitempty"`
+	Backend       string  `json:"backend"`
+	Version       int     `json:"version"`
+	Channel       string  `json:"channel"`
+	TitleBoost    float64 `json:"title_boost,omitempty"`
+	BodyBoost     float64 `json:"body_boost,omitempty"`
+	ContentDigest string  `json:"content_digest"`
 }
 
 type VectorIdentity struct {
@@ -35,6 +36,7 @@ type VectorIdentity struct {
 	Model                string `json:"model"`
 	Dimensions           int    `json:"dimensions"`
 	RepresentationDigest string `json:"representation_digest"`
+	ContentDigest        string `json:"content_digest"`
 }
 
 type Manifest struct {
@@ -111,6 +113,6 @@ func lexicalIdentity(manifest bleveindex.Manifest) BackendIdentity {
 	return BackendIdentity{
 		Backend: manifest.Backend, Version: manifest.Version,
 		Channel: manifest.Channel, TitleBoost: manifest.TitleBoost,
-		BodyBoost: manifest.BodyBoost,
+		BodyBoost: manifest.BodyBoost, ContentDigest: manifest.ContentDigest,
 	}
 }
