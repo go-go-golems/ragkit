@@ -130,7 +130,13 @@ func (i *Index) SearchVector(queryVector []float32, limit int) ([]rag.Hit, error
 		return nil, errors.New("search limit must be positive")
 	}
 	i.mu.Lock()
-	nodes := i.graph.Search(queryVector, limit)
+	// Search beyond the requested output limit before applying our canonical
+	// score/identity order. HNSW may choose an arbitrary member at a tied
+	// score boundary when asked for exactly limit nodes; overfetching to the
+	// configured search breadth makes ties deterministic without changing the
+	// bounded public result.
+	searchLimit := max(limit, i.graph.EfSearch)
+	nodes := i.graph.Search(queryVector, searchLimit)
 	i.mu.Unlock()
 	hits := make([]rag.Hit, 0, len(nodes))
 	for _, node := range nodes {
@@ -145,6 +151,9 @@ func (i *Index) SearchVector(queryVector []float32, limit int) ([]rag.Hit, error
 		hits = append(hits, rag.Hit{RepresentationID: entry.RepresentationID, ChunkID: entry.ChunkID, DocumentID: entry.DocumentID, Channel: i.channel, Score: score})
 	}
 	sort.Slice(hits, func(a, b int) bool { return rag.HitRanksBefore(hits[a], hits[b]) })
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
 	for position := range hits {
 		hits[position].Rank = position + 1
 	}
