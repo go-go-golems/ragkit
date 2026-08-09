@@ -393,6 +393,27 @@ func TestRunMultiResourceAdmissionRollsBackEarlierBudgets(t *testing.T) {
 	require.Equal(t, 0, shared.Snapshots()["first"].Spent)
 }
 
+func TestRunRejectsDuplicateAdmissionResourcesBeforeWork(t *testing.T) {
+	calls := 0
+	step := doubler("duplicate", Policy{Admission: []Resource{
+		{Name: "calls", Ceiling: 2, Budget: 2},
+		{Name: "calls", Ceiling: 2, Budget: 2},
+	}})
+	step.Do = func(context.Context, int) (int, error) { calls++; return 0, nil }
+	_, _, err := Run(t.Context(), step, []int{1}, Options{})
+	require.ErrorContains(t, err, "more than once")
+	require.Zero(t, calls)
+}
+
+func TestRunRejectsUnknownFailureModeBeforeWork(t *testing.T) {
+	calls := 0
+	step := doubler("unknown-mode", Policy{OnError: FailureMode(99)})
+	step.Do = func(context.Context, int) (int, error) { calls++; return 0, nil }
+	_, _, err := Run(t.Context(), step, []int{1}, Options{})
+	require.ErrorContains(t, err, "unknown failure mode")
+	require.Zero(t, calls)
+}
+
 func TestRunSharedPreflightKeepsRefusingUnpricedPlan(t *testing.T) {
 	var calls atomic.Int64
 	step := doubler("unpriced", Policy{

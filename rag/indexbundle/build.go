@@ -172,6 +172,11 @@ func validateBuildInput(input BuildInput) error {
 		input.Chunker.OverlapRunes < 0 || input.Chunker.OverlapRunes >= input.Chunker.MaximumRunes {
 		return errors.New("valid bundle chunker identity is required")
 	}
+	for _, chunk := range input.Chunks {
+		if chunk.Chunker != input.Chunker.Name {
+			return errors.Errorf("chunk %q uses chunker %q but bundle declares %q", chunk.ID, chunk.Chunker, input.Chunker.Name)
+		}
+	}
 	// A nil Embedding identity requests a lexical-only bundle; vector inputs
 	// must then be absent so a half-configured build fails loudly.
 	if input.Embedding == nil {
@@ -186,6 +191,10 @@ func validateBuildInput(input BuildInput) error {
 	if strings.TrimSpace(input.Embedding.Provider) == "" ||
 		strings.TrimSpace(input.Embedding.Model) == "" || input.Embedding.Dimensions <= 0 {
 		return errors.New("valid vector embedding provider, model, and dimensions are required")
+	}
+	if input.Embedding.Backend != "sqlite-exact" || input.Embedding.Version != 1 ||
+		strings.TrimSpace(input.Embedding.Channel) == "" {
+		return errors.New("vector identity must declare sqlite-exact backend version 1 and a channel")
 	}
 	for _, vector := range input.Vectors {
 		if vector.Model != input.Embedding.Model || len(vector.Values) != input.Embedding.Dimensions {

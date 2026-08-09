@@ -191,6 +191,10 @@ func validateStoredChunks(chunks []rag.Chunk, documentCount int) error {
 		if digest.Text(chunk.Text) != chunk.ContentDigest {
 			return errors.Errorf("bundle chunk %q content digest mismatch", chunk.ID)
 		}
+		if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart ||
+			chunk.Range.ByteEnd-chunk.Range.ByteStart != len([]byte(chunk.Text)) {
+			return errors.Errorf("bundle chunk %q has an invalid stored byte range", chunk.ID)
+		}
 		if _, duplicate := chunkIDs[chunk.ID]; duplicate {
 			return errors.Errorf("bundle contains duplicate chunk %q", chunk.ID)
 		}

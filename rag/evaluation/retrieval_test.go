@@ -1,6 +1,7 @@
 package evaluation
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -20,6 +21,25 @@ func TestRetrievalMetrics(t *testing.T) {
 	}
 	if metrics.MRR != 0.5 || metrics.RecallAt[1] != 0 || metrics.RecallAt[2] != 1 {
 		t.Fatalf("metrics = %+v", metrics)
+	}
+}
+
+func TestRetrievalNDCGRemainsFiniteForLargeGrades(t *testing.T) {
+	metrics, err := Retrieval(
+		rag.Query{ID: "q"}, []string{"high", "low"},
+		[]rag.Judgment{
+			{QueryID: "q", Target: "document", TargetID: "high", Grade: 1024},
+			{QueryID: "q", Target: "document", TargetID: "low", Grade: 1},
+		}, []int{2},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.IsNaN(metrics.NDCGAt[2]) || math.IsInf(metrics.NDCGAt[2], 0) {
+		t.Fatalf("NDCG@2 = %v", metrics.NDCGAt[2])
+	}
+	if _, err := json.Marshal(metrics); err != nil {
+		t.Fatalf("marshal metrics: %v", err)
 	}
 }
 

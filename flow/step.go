@@ -59,6 +59,9 @@ type Step[I, O any] struct {
 	// nested steps (Batched repairs) so the shared preflight sees them
 	// before item one.
 	extraPlans []stagePlan
+	// extraPolicies names nested policies consumed by an override so they are
+	// validated before the override performs any provider work.
+	extraPolicies []policySpec
 	// stages is the flattened pipeline representation (set by Pipe*).
 	stages []stageSpec
 }

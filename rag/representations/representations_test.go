@@ -2,6 +2,7 @@ package representations
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/digest"
@@ -111,6 +112,16 @@ func TestExtractiveSummarizerCapsLongText(t *testing.T) {
 	}
 	if len([]rune(summary)) > 41 { // 40 + ellipsis
 		t.Fatalf("summary length = %d runes, want <= 41", len([]rune(summary)))
+	}
+}
+
+func TestExtractiveSummarizerDoesNotIncludeBoundaryPastMaxRunes(t *testing.T) {
+	summary, err := (ExtractiveSummarizer{MaxRunes: 5}).Summarize(context.Background(), chunk("chunk", "abcde. later"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len([]rune(strings.TrimSuffix(summary, "…"))); got != 5 {
+		t.Fatalf("summary content length = %d, want 5: %q", got, summary)
 	}
 }
 

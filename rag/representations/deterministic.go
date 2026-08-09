@@ -51,6 +51,7 @@ func SmallToBig(small, parents []rag.Chunk) ([]rag.Representation, error) {
 		parentsByDocument[parent.DocumentID] = append(parentsByDocument[parent.DocumentID], parent)
 	}
 	reps := make([]rag.Representation, 0, len(small))
+	seen := make(map[string]struct{}, len(small))
 	for _, chunk := range small {
 		parent, ok := bestParent(chunk, parentsByDocument[chunk.DocumentID])
 		if !ok {
@@ -63,6 +64,10 @@ func SmallToBig(small, parents []rag.Chunk) ([]rag.Representation, error) {
 		if err != nil {
 			return nil, err
 		}
+		if _, duplicate := seen[rep.ID]; duplicate {
+			continue
+		}
+		seen[rep.ID] = struct{}{}
 		reps = append(reps, rep)
 	}
 	return reps, nil

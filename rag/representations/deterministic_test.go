@@ -67,3 +67,18 @@ func TestSmallToBigFailsWithoutACoveringParent(t *testing.T) {
 		t.Fatal("orphan small chunk must fail, not silently drop")
 	}
 }
+
+func TestSmallToBigDeduplicatesIdenticalRepresentations(t *testing.T) {
+	parent := rag.Chunk{ID: "parent", DocumentID: "d", Range: rag.Range{ByteStart: 0, ByteEnd: 20}, Text: "parent", ContentDigest: "p"}
+	small := []rag.Chunk{
+		{ID: "small-a", DocumentID: "d", Range: rag.Range{ByteStart: 0, ByteEnd: 4}, Text: "same", ContentDigest: "a"},
+		{ID: "small-b", DocumentID: "d", Range: rag.Range{ByteStart: 5, ByteEnd: 9}, Text: "same", ContentDigest: "b"},
+	}
+	reps, err := SmallToBig(small, []rag.Chunk{parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reps) != 1 {
+		t.Fatalf("representations = %d, want one unique identity", len(reps))
+	}
+}

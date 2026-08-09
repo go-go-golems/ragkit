@@ -71,6 +71,19 @@ func TestDocumentSummariesAreDeterministicAcrossRuns(t *testing.T) {
 	}
 }
 
+func TestDocumentSummariesHydrateToSourceFirstChunkWhenInputIsShuffled(t *testing.T) {
+	documents, chunks := batchedFixture(3)
+	shuffled := []rag.Chunk{chunks[2], chunks[0], chunks[1]}
+	reps, err := DocumentSummaries(context.Background(), documents, shuffled,
+		documentSummaryGenerate(t, documents), GeneratedSpec{Model: "glm", Prompt: "doc-sum"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reps[0].ChunkID != chunks[0].ID {
+		t.Fatalf("hydration chunk = %q, want source-first %q", reps[0].ChunkID, chunks[0].ID)
+	}
+}
+
 func TestDocumentSummariesRequireAChunkToHydrateTo(t *testing.T) {
 	documents, _ := batchedFixture(1)
 	called := false

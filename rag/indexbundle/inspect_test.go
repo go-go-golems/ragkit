@@ -301,10 +301,10 @@ func TestInspectOpensNeitherTheVectorStoreNorTheLexicalIndex(t *testing.T) {
 // neighbour produces a wrong overlap marker.
 func TestChunksOfReturnsOrdinalOrderWhateverTheFileOrderWas(t *testing.T) {
 	shuffled := []rag.Chunk{
-		{ID: "c2", DocumentID: "doc-a", Ordinal: 2, Text: "b", ContentDigest: digest.Text("b")},
-		{ID: "c0", DocumentID: "doc-a", Ordinal: 0, Text: "a", ContentDigest: digest.Text("a")},
-		{ID: "other", DocumentID: "doc-b", Ordinal: 0, Text: "z", ContentDigest: digest.Text("z")},
-		{ID: "c1", DocumentID: "doc-a", Ordinal: 1, Text: "c", ContentDigest: digest.Text("c")},
+		{ID: "c2", DocumentID: "doc-a", Ordinal: 2, Range: rag.Range{ByteStart: 2, ByteEnd: 3}, Text: "b", ContentDigest: digest.Text("b")},
+		{ID: "c0", DocumentID: "doc-a", Ordinal: 0, Range: rag.Range{ByteStart: 0, ByteEnd: 1}, Text: "a", ContentDigest: digest.Text("a")},
+		{ID: "other", DocumentID: "doc-b", Ordinal: 0, Range: rag.Range{ByteStart: 0, ByteEnd: 1}, Text: "z", ContentDigest: digest.Text("z")},
+		{ID: "c1", DocumentID: "doc-a", Ordinal: 1, Range: rag.Range{ByteStart: 1, ByteEnd: 2}, Text: "c", ContentDigest: digest.Text("c")},
 	}
 	directory := writeBundle(t, Manifest{DocumentCount: 2}, shuffled)
 	inspection, err := Inspect(t.Context(), directory)

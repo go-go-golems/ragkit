@@ -118,6 +118,9 @@ func (s *Service) ValidateRequest(request Request) error {
 			return errors.New("RRF constant must be finite and greater than zero")
 		}
 		for channel, weight := range request.Config.RRFWeights {
+			if channel != "bm25" && channel != "vector" {
+				return errors.Errorf("unknown RRF weight channel %q", channel)
+			}
 			if math.IsNaN(weight) || math.IsInf(weight, 0) || weight <= 0 {
 				return errors.Errorf("RRF weight for channel %q must be finite and greater than zero", channel)
 			}

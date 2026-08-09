@@ -56,6 +56,16 @@ func TestRRFRejectsInvalidWeightsBeforeSearch(t *testing.T) {
 	}
 }
 
+func TestRRFRejectsUnknownWeightChannelsBeforeSearch(t *testing.T) {
+	service, lexical, vector := serviceFixture()
+	request := requestFixture(StrategyRRF)
+	request.Config.RRFWeights = map[string]float64{"vectro": 2}
+	_, err := service.Retrieve(t.Context(), request)
+	require.ErrorContains(t, err, "unknown RRF weight channel")
+	require.Zero(t, lexical.calls)
+	require.Zero(t, vector.calls)
+}
+
 type reversingReranker struct{ candidates int }
 
 func (r *reversingReranker) Rerank(_ context.Context, request rag.RerankRequest) (rag.RerankResult, error) {
