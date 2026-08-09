@@ -43,17 +43,15 @@ func (s BatchedSpec) groupSize() int {
 }
 
 // BatchedCallCeiling is the worst-case call count for one batched spec over
-// the given chunk count: every group plus one repair call per chunk. Budget
-// refusals state this ceiling; a healthy run uses only the group calls.
+// the given chunk count: one possible document-bounded group plus one repair
+// call per chunk. Chunk count alone cannot reveal document boundaries, so the
+// conservative ceiling assumes every chunk belongs to a different document.
 func BatchedCallCeiling(chunks, groupSize int) int {
-	if groupSize <= 0 {
-		groupSize = DefaultBatchGroupSize
-	}
+	_ = groupSize // retained because callers state the configured batch size
 	if chunks <= 0 {
 		return 0
 	}
-	groups := (chunks + groupSize - 1) / groupSize
-	return groups + chunks
+	return 2 * chunks
 }
 
 // batchedGroup is one call's worth of chunks, all from one document.

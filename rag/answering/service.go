@@ -323,7 +323,12 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 			_ = state.emit(context.WithoutCancel(ctx), StageReranking, ObservationFailed, rerankStarted, time.Since(rerankStarted), nil, rerankErr.Error())
 			return RetrievalResult{}, errors.Wrap(rerankErr, "rerank RRF candidates")
 		}
-		evidence = reranked.Evidence
+		evidence, err = validateRerankedEvidence(evidence, reranked.Evidence, request.Config.EvidenceK)
+		if err != nil {
+			_ = state.emit(context.WithoutCancel(ctx), StageReranking, ObservationFailed, rerankStarted, time.Since(rerankStarted), nil, err.Error())
+			return RetrievalResult{}, errors.Wrap(err, "validate reranker output")
+		}
+		reranked.Evidence = evidence
 		if err := state.emit(ctx, StageReranking, ObservationCompleted, rerankStarted, time.Since(rerankStarted), reranked, ""); err != nil {
 			return RetrievalResult{}, err
 		}
@@ -561,18 +566,20 @@ func (s *Service) generateVariants(
 		return nil, message, nil
 	}
 	variants := make([]string, 0, count)
+	seen := map[string]bool{query.Text: true}
 	for _, variant := range parsed.Variants {
 		variant = strings.TrimSpace(variant)
-		if variant == "" || variant == query.Text {
+		if variant == "" || seen[variant] {
 			continue
 		}
+		seen[variant] = true
 		variants = append(variants, variant)
 		if len(variants) == count {
 			break
 		}
 	}
-	if len(variants) == 0 {
-		message := "the generator returned no usable variants"
+	if len(variants) != count {
+		message := fmt.Sprintf("the generator returned %d distinct usable variants; expected %d", len(variants), count)
 		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
 		return nil, message, nil
 	}
@@ -580,6 +587,37 @@ func (s *Service) generateVariants(
 		return nil, "", err
 	}
 	return variants, "", nil
+}
+
+// validateRerankedEvidence treats provider output as an ordering and score
+// decision, never as authoritative source evidence. Every returned ID must be
+// a distinct candidate, and the provider must return the requested count.
+func validateRerankedEvidence(candidates, returned []rag.Evidence, requested int) ([]rag.Evidence, error) {
+	want := min(requested, len(candidates))
+	if len(returned) != want {
+		return nil, errors.Errorf("reranker returned %d results, want %d", len(returned), want)
+	}
+	byID := make(map[string]rag.Evidence, len(candidates))
+	for _, candidate := range candidates {
+		byID[candidate.Chunk.ID] = candidate
+	}
+	seen := make(map[string]bool, len(returned))
+	validated := make([]rag.Evidence, 0, len(returned))
+	for index, item := range returned {
+		id := item.Chunk.ID
+		candidate, ok := byID[id]
+		if !ok {
+			return nil, errors.Errorf("reranker result %d references unknown chunk %q", index, id)
+		}
+		if seen[id] {
+			return nil, errors.Errorf("reranker returned duplicate chunk %q", id)
+		}
+		seen[id] = true
+		candidate.Rank = index + 1
+		candidate.RerankerScore = item.RerankerScore
+		validated = append(validated, candidate)
+	}
+	return validated, nil
 }
 
 // generateHypothetical asks the generator for a hypothetical answer whose

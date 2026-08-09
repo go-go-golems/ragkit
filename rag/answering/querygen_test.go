@@ -77,6 +77,19 @@ func TestMultiQueryFallsBackWhenTheContractFails(t *testing.T) {
 	require.NotEmpty(t, result.Fused)
 }
 
+func TestMultiQueryFallsBackUnlessAllVariantsAreDistinctAndUsable(t *testing.T) {
+	service, lexical, _ := querygenFixture(
+		`{"variants":["question","distinct","distinct",""]}`, nil,
+	)
+	request := requestFixture(StrategyMultiQuery)
+	request.Config.QueryVariants = 2
+	result, err := service.Retrieve(t.Context(), request)
+	require.NoError(t, err)
+	require.Empty(t, result.Variants)
+	require.Contains(t, result.VariantError, "1 distinct usable variants; expected 2")
+	require.Len(t, lexical.queries, 1, "partial reformulations must not change retrieval")
+}
+
 func TestHyDEUsesTheHypotheticalOnTheVectorChannelOnly(t *testing.T) {
 	service, lexical, vector := querygenFixture(
 		"Prune Leyland Cypress in early spring before growth begins.", nil,
@@ -106,7 +119,7 @@ func TestHyDEFallsBackToTheQuestionOnEmptyGeneration(t *testing.T) {
 func TestQueryGenerationObserverFailureStopsRetrieval(t *testing.T) {
 	for _, strategy := range []Strategy{StrategyMultiQuery, StrategyHyDE} {
 		t.Run(string(strategy), func(t *testing.T) {
-			generated := `{"variants":["variant"]}`
+			generated := `{"variants":["variant-1","variant-2","variant-3"]}`
 			if strategy == StrategyHyDE {
 				generated = "hypothetical answer"
 			}

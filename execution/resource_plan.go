@@ -2,6 +2,7 @@ package execution
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -29,8 +30,8 @@ func ValidateResourcePlans(
 	allowPartial bool,
 ) (CostPreflight, error) {
 	preflight := CostPreflight{}
-	if maximumUSD < 0 {
-		return preflight, fmt.Errorf("maximum USD must be non-negative")
+	if math.IsNaN(maximumUSD) || math.IsInf(maximumUSD, 0) || maximumUSD < 0 {
+		return preflight, fmt.Errorf("maximum USD must be finite and non-negative")
 	}
 	seen := make(map[string]bool, len(plans))
 	for index, plan := range plans {
@@ -62,8 +63,8 @@ func ValidateResourcePlans(
 			preflight.MissingPrices = append(preflight.MissingPrices, plan.Name)
 			continue
 		}
-		if *plan.UnitUSD < 0 {
-			return preflight, fmt.Errorf("resource %q unit price must be non-negative", plan.Name)
+		if math.IsNaN(*plan.UnitUSD) || math.IsInf(*plan.UnitUSD, 0) || *plan.UnitUSD < 0 {
+			return preflight, fmt.Errorf("resource %q unit price must be finite and non-negative", plan.Name)
 		}
 		preflight.EstimatedUSD += float64(plan.Ceiling) * *plan.UnitUSD
 	}

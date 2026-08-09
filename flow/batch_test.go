@@ -244,7 +244,7 @@ func TestBatchedGroupFailureUnderFailFastKillsRun(t *testing.T) {
 
 func TestBatchedSharedResourceDrawsOneBudget(t *testing.T) {
 	// Group calls and repairs share one admission resource: the
-	// BatchedCallCeiling arithmetic (groups + one repair per item).
+	// BatchedCallCeiling arithmetic (one possible group + repair per item).
 	resource := Resource{Name: "family-calls", Ceiling: 4, Budget: 2}
 	repair := chunkStep(nil)
 	repair.Policy.Admission = []Resource{resource}

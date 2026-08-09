@@ -56,6 +56,9 @@ var _ rag.Index = (*Index)(nil)
 // CalculateContentDigest returns the canonical digest of the logical records
 // Build will index. Bundle identity uses it before the backend is published.
 func CalculateContentDigest(documents []rag.Document, chunks []rag.Chunk, representations []rag.Representation) (string, error) {
+	if err := validateRepresentationIDs(representations); err != nil {
+		return "", err
+	}
 	documentByID := make(map[string]rag.Document, len(documents))
 	for _, document := range documents {
 		documentByID[document.ID] = document
@@ -89,6 +92,9 @@ func CalculateContentDigest(documents []rag.Document, chunks []rag.Chunk, repres
 
 func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []rag.Chunk, representations []rag.Representation) (*Index, Manifest, error) {
 	cfg = defaults(cfg)
+	if err := validateRepresentationIDs(representations); err != nil {
+		return nil, Manifest{}, err
+	}
 	if strings.TrimSpace(cfg.Path) == "" {
 		return nil, Manifest{}, errors.New("Bleve index path is required")
 	}
@@ -217,6 +223,20 @@ func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []r
 		return nil, Manifest{}, err
 	}
 	return opened, manifest, nil
+}
+
+func validateRepresentationIDs(representations []rag.Representation) error {
+	seen := make(map[string]bool, len(representations))
+	for index, representation := range representations {
+		if strings.TrimSpace(representation.ID) == "" {
+			return errors.Errorf("representation %d has no ID", index)
+		}
+		if seen[representation.ID] {
+			return errors.Errorf("duplicate representation ID %q", representation.ID)
+		}
+		seen[representation.ID] = true
+	}
+	return nil
 }
 
 // InspectContentDigest reconstructs the canonical logical records from the

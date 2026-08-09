@@ -41,12 +41,13 @@ func (c Config) Validate() error {
 }
 
 type Index struct {
-	mu       sync.Mutex
-	graph    *hnsw.Graph[string]
-	entries  map[string]Entry
-	model    string
-	channel  string
-	embedder rag.Embedder
+	mu         sync.Mutex
+	graph      *hnsw.Graph[string]
+	entries    map[string]Entry
+	model      string
+	channel    string
+	dimensions int
+	embedder   rag.Embedder
 }
 
 var _ rag.Index = (*Index)(nil)
@@ -95,7 +96,7 @@ func Build(cfg Config, entries []Entry, embedder rag.Embedder) (*Index, error) {
 	if channel == "" {
 		channel = "hnsw"
 	}
-	return &Index{graph: graph, entries: entryByID, model: cfg.Model, channel: channel, embedder: embedder}, nil
+	return &Index{graph: graph, entries: entryByID, model: cfg.Model, channel: channel, dimensions: dimensions, embedder: embedder}, nil
 }
 func (i *Index) SetEfSearch(value int) error {
 	if value < 1 {
@@ -128,6 +129,12 @@ func (i *Index) SearchVector(queryVector []float32, limit int) ([]rag.Hit, error
 	}
 	if limit < 1 {
 		return nil, errors.New("search limit must be positive")
+	}
+	if len(queryVector) != i.dimensions {
+		return nil, errors.Errorf("HNSW query has %d dimensions, want %d", len(queryVector), i.dimensions)
+	}
+	if err := vectorutil.ValidateFinite(queryVector); err != nil {
+		return nil, errors.Wrap(err, "validate HNSW query vector")
 	}
 	i.mu.Lock()
 	// Search beyond the requested output limit before applying our canonical

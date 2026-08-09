@@ -3,6 +3,7 @@ package bleve
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -44,6 +45,20 @@ func TestBuildSearchReopen(t *testing.T) {
 	}
 	if len(reopenedHits) != len(hits) || reopenedHits[0].RepresentationID != hits[0].RepresentationID {
 		t.Fatalf("reopen mismatch: %#v != %#v", reopenedHits, hits)
+	}
+}
+
+func TestBuildRejectsDuplicateRepresentationIDsBeforeCreatingOutput(t *testing.T) {
+	t.Parallel()
+	documents, chunks, representations := fixture()
+	representations[1].ID = representations[0].ID
+	path := filepath.Join(t.TempDir(), "duplicate.bleve")
+	_, _, err := Build(t.Context(), Config{Path: path}, documents, chunks, representations)
+	if err == nil {
+		t.Fatal("Build() error = nil")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("output exists after validation failure: %v", statErr)
 	}
 }
 

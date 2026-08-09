@@ -37,6 +37,12 @@ func (r *reversingReranker) Rerank(_ context.Context, request rag.RerankRequest)
 	return rag.RerankResult{Evidence: result}, nil
 }
 
+type fixedReranker struct{ evidence []rag.Evidence }
+
+func (r fixedReranker) Rerank(context.Context, rag.RerankRequest) (rag.RerankResult, error) {
+	return rag.RerankResult{Evidence: r.evidence}, nil
+}
+
 type fixedGenerator struct {
 	request rag.GenerationRequest
 	result  rag.GenerationResult
@@ -127,6 +133,33 @@ func TestRerankedStrategyBoundsCandidates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, reranker.candidates)
 	require.Len(t, result.Evidence, 2)
+}
+
+func TestRerankedStrategyValidatesIdentitiesAndRehydratesSourceEvidence(t *testing.T) {
+	service, _, _ := serviceFixture()
+	request := requestFixture(StrategyRRFReranked)
+	score := 0.9
+	service.Reranker = fixedReranker{evidence: []rag.Evidence{
+		{Chunk: rag.Chunk{ID: "chunk-c", Text: "provider replacement"}, RerankerScore: &score},
+		{Chunk: rag.Chunk{ID: "chunk-b"}},
+	}}
+	result, err := service.Retrieve(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, []string{"chunk-c", "chunk-b"}, evidenceIDs(result.Evidence))
+	require.Equal(t, "c", result.Evidence[0].Chunk.Text)
+	require.Equal(t, &score, result.Evidence[0].RerankerScore)
+
+	for name, returned := range map[string][]rag.Evidence{
+		"too few":   {{Chunk: rag.Chunk{ID: "chunk-c"}}},
+		"duplicate": {{Chunk: rag.Chunk{ID: "chunk-c"}}, {Chunk: rag.Chunk{ID: "chunk-c"}}},
+		"unknown":   {{Chunk: rag.Chunk{ID: "chunk-c"}}, {Chunk: rag.Chunk{ID: "injected"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service.Reranker = fixedReranker{evidence: returned}
+			_, err := service.Retrieve(t.Context(), request)
+			require.ErrorContains(t, err, "validate reranker output")
+		})
+	}
 }
 
 func TestQuestionAndRetrievalQueryHaveSeparateRoutes(t *testing.T) {

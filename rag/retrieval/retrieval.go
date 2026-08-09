@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -59,8 +60,8 @@ type RRFConfig struct {
 
 // WeightedRRF fuses already-collapsed channel results by chunk identity.
 func WeightedRRF(channels map[string][]rag.Hit, config RRFConfig) ([]rag.FusedHit, error) {
-	if config.RankConstant <= 0 {
-		return nil, fmt.Errorf("RRF rank constant must be positive")
+	if math.IsNaN(config.RankConstant) || math.IsInf(config.RankConstant, 0) || config.RankConstant <= 0 {
+		return nil, fmt.Errorf("RRF rank constant must be finite and positive")
 	}
 	channelNames := make([]string, 0, len(channels))
 	for channel := range channels {
@@ -70,6 +71,9 @@ func WeightedRRF(channels map[string][]rag.Hit, config RRFConfig) ([]rag.FusedHi
 	byChunk := map[string]*rag.FusedHit{}
 	for _, channel := range channelNames {
 		weight := config.Weights[channel]
+		if math.IsNaN(weight) || math.IsInf(weight, 0) {
+			return nil, fmt.Errorf("RRF weight for channel %q must be finite", channel)
+		}
 		if weight == 0 {
 			weight = 1
 		}

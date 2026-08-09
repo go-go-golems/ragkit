@@ -3,6 +3,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -325,6 +326,23 @@ func TestRunPreflightMonetaryGate(t *testing.T) {
 	_, _, err = Run(context.Background(), unpriced, []int{1}, Options{Preflight: &Preflight{MaxEstimatedUSD: 5}})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pricing unavailable for unpriced-calls")
+}
+
+func TestRunRejectsNonFiniteUnitPriceBeforeWork(t *testing.T) {
+	for _, unit := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		var calls atomic.Int64
+		step := doubler("priced", Policy{Admission: []Resource{{
+			Name: "priced-calls", Ceiling: 1, Budget: 1, UnitUSD: &unit,
+		}}})
+		base := step.Do
+		step.Do = func(ctx context.Context, value int) (int, error) {
+			calls.Add(1)
+			return base(ctx, value)
+		}
+		_, _, err := Run(t.Context(), step, []int{1}, Options{})
+		require.ErrorContains(t, err, "finite and non-negative")
+		require.Zero(t, calls.Load())
+	}
 }
 
 func TestRunSharedPreflightKeepsRefusingUnpricedPlan(t *testing.T) {
