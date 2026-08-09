@@ -109,6 +109,9 @@ func (s *Service) ValidateRequest(request Request) error {
 	if request.Config.MaximumContextRunes <= 0 {
 		return errors.New("maximum context runes must be greater than zero")
 	}
+	if request.Config.QueryVariants < 0 {
+		return errors.New("query variants must not be negative")
+	}
 	switch request.Config.Strategy {
 	case StrategyRRF, StrategyRRFReranked, StrategyMultiQuery, StrategyHyDE:
 		if math.IsNaN(request.Config.RRFConstant) || math.IsInf(request.Config.RRFConstant, 0) || request.Config.RRFConstant <= 0 {
@@ -624,6 +627,9 @@ func validateRerankedEvidence(candidates, returned []rag.Evidence, requested int
 			return nil, errors.Errorf("reranker returned duplicate chunk %q", id)
 		}
 		seen[id] = true
+		if score := item.RerankerScore; score != nil && (math.IsNaN(*score) || math.IsInf(*score, 0)) {
+			return nil, errors.Errorf("reranker result %d for chunk %q has a non-finite score", index, id)
+		}
 		candidate.Rank = index + 1
 		candidate.RerankerScore = item.RerankerScore
 		validated = append(validated, candidate)

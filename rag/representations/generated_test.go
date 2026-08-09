@@ -59,6 +59,14 @@ func TestHeadingPathIncludesDistinctLevelOneHeading(t *testing.T) {
 	}
 }
 
+func TestHeadingPathIncludesHeadingAtChunkStart(t *testing.T) {
+	text := "# Catalog\n\n## Previous\n\nold body\n\n## Current\n\nnew body"
+	chunk := rag.Chunk{Range: rag.Range{ByteStart: strings.Index(text, "## Current")}}
+	if path := HeadingPath(rag.Document{Title: "Catalog", Text: text}, chunk); path != "Catalog > Current" {
+		t.Fatalf("heading path = %q, want %q", path, "Catalog > Current")
+	}
+}
+
 func TestParseQuestionLinesPreservesLeadingDigitsOutsideListMarkers(t *testing.T) {
 	questions := ParseQuestionLines("2024 planting guidance\n1. First question\n2) Second question")
 	want := []string{"2024 planting guidance", "First question", "Second question"}

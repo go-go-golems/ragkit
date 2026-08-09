@@ -199,8 +199,18 @@ func HeadingPath(document rag.Document, chunk rag.Chunk) string {
 	if start > len(document.Text) {
 		start = len(document.Text)
 	}
+	// A structural chunk may begin at the heading that governs it. Include
+	// that complete line in the breadcrumb scan; slicing strictly before the
+	// byte offset would retain the preceding section instead.
+	scanEnd := start
+	if start < len(document.Text) && (start == 0 || document.Text[start-1] == '\n') {
+		scanEnd = len(document.Text)
+		if newline := strings.IndexByte(document.Text[start:], '\n'); newline >= 0 {
+			scanEnd = start + newline
+		}
+	}
 	levels := make([]string, 7)
-	for _, line := range strings.Split(document.Text[:start], "\n") {
+	for _, line := range strings.Split(document.Text[:scanEnd], "\n") {
 		trimmed := strings.TrimSpace(line)
 		level := 0
 		for level < len(trimmed) && trimmed[level] == '#' {
