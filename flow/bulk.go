@@ -24,8 +24,8 @@ import (
 func Bulk[I, O any](s Step[I, O], doBulk func(context.Context, []I) ([]O, error), batchSize int) Step[I, O] {
 	bulk := s
 	bulk.Do = nil
-	bulk.override = func(ctx context.Context, items []I, o Options) ([]Result[O], Report, error) {
-		return runBulk(ctx, s, doBulk, batchSize, items, o)
+	bulk.override = func(ctx context.Context, items []I, o Options, onResult func(context.Context, int, O, execution.CacheOutcome) error) ([]Result[O], Report, error) {
+		return runBulk(ctx, s, doBulk, batchSize, items, o, onResult)
 	}
 	return bulk
 }
@@ -37,6 +37,7 @@ func runBulk[I, O any](
 	batchSize int,
 	items []I,
 	o Options,
+	onResult func(context.Context, int, O, execution.CacheOutcome) error,
 ) ([]Result[O], Report, error) {
 	counts := StepReport{}
 	meters := Meters{}
@@ -105,10 +106,10 @@ func runBulk[I, O any](
 	}
 
 	notify := func(index int, value O, outcome execution.CacheOutcome) error {
-		if s.OnResult == nil {
+		if onResult == nil {
 			return nil
 		}
-		if err := s.OnResult(ctx, index, value, outcome); err != nil {
+		if err := onResult(ctx, index, value, outcome); err != nil {
 			return fmt.Errorf("step %q item %d: result hook: %w", s.Name, index, err)
 		}
 		return nil
@@ -198,17 +199,6 @@ func runBulk[I, O any](
 		Workers: max(s.Policy.Workers, 1),
 	}, func(ctx context.Context, current batch) (struct{}, error) {
 		units := len(current.groups)
-		if name, err := o.env.admit(ctx, resources, units); err != nil {
-			if errors.Is(err, execution.ErrBudgetExceeded) {
-				plan := o.env.plan(name)
-				return struct{}{}, fmt.Errorf(
-					"step %q: resource %q admission refused a %d-item batch: %w; stated ceiling %d, admitted budget %d — cache hits are free",
-					s.Name, name, units, err, plan.Ceiling, plan.Budget,
-				)
-			}
-			return struct{}{}, fmt.Errorf("step %q: wait for resource %q: %w", s.Name, name, err)
-		}
-
 		batchItems := make([]I, len(current.groups))
 		for position, group := range current.groups {
 			batchItems[position] = group.item
@@ -230,6 +220,16 @@ func runBulk[I, O any](
 				if delay > backoff.Cap {
 					delay = backoff.Cap
 				}
+			}
+			if name, err := o.env.admit(ctx, resources, units); err != nil {
+				if errors.Is(err, execution.ErrBudgetExceeded) {
+					plan := o.env.plan(name)
+					return struct{}{}, fmt.Errorf(
+						"step %q attempt %d: resource %q admission refused a %d-item batch: %w; stated ceiling %d, admitted budget %d — cache hits are free",
+						s.Name, attempt, name, units, err, plan.Ceiling, plan.Budget,
+					)
+				}
+				return struct{}{}, fmt.Errorf("step %q attempt %d: wait for resource %q: %w", s.Name, attempt, name, err)
 			}
 			attemptsMade = attempt
 			returned, err := doBulk(ctx, batchItems)

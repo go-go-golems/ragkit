@@ -54,7 +54,7 @@ type Step[I, O any] struct {
 	OnResult func(context.Context, int, O, execution.CacheOutcome) error
 
 	// override replaces the standard per-item engine (set by Batched).
-	override func(context.Context, []I, Options) ([]Result[O], Report, error)
+	override func(context.Context, []I, Options, func(context.Context, int, O, execution.CacheOutcome) error) ([]Result[O], Report, error)
 	// extraPlans declares admission resources consumed by an override's
 	// nested steps (Batched repairs) so the shared preflight sees them
 	// before item one.

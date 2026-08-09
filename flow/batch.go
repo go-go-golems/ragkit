@@ -3,6 +3,8 @@ package flow
 import (
 	"context"
 	"fmt"
+
+	"github.com/go-go-golems/ragkit/execution"
 )
 
 // BatchSpec configures batching-with-repair: many items share one provider
@@ -49,8 +51,8 @@ func Batched[I, O any](repair Step[I, O], spec BatchSpec[I, O]) Step[I, O] {
 		Policy:     spec.Policy,
 		extraPlans: policyPlans(repair.Name, repair.Policy),
 	}
-	step.override = func(ctx context.Context, items []I, o Options) ([]Result[O], Report, error) {
-		return runBatched(ctx, repair, spec, name, items, o)
+	step.override = func(ctx context.Context, items []I, o Options, onResult func(context.Context, int, O, execution.CacheOutcome) error) ([]Result[O], Report, error) {
+		return runBatched(ctx, repair, spec, name, items, o, onResult)
 	}
 	return step
 }
@@ -62,6 +64,7 @@ func runBatched[I, O any](
 	name string,
 	items []I,
 	o Options,
+	onResult func(context.Context, int, O, execution.CacheOutcome) error,
 ) ([]Result[O], Report, error) {
 	report := Report{}
 	if spec.Group == nil || spec.DoAll == nil || spec.Split == nil {
@@ -136,6 +139,11 @@ func runBatched[I, O any](
 				continue
 			}
 			results[itemIndex] = Result[O]{Value: value}
+			if onResult != nil {
+				if err := onResult(ctx, itemIndex, value, execution.CacheOutcome{}); err != nil {
+					return nil, report, fmt.Errorf("step %q item %d: result hook: %w", name, itemIndex, err)
+				}
+			}
 		}
 	}
 
@@ -159,6 +167,11 @@ func runBatched[I, O any](
 			result.Quarantined = &adjusted
 		}
 		results[itemIndex] = result
+		if result.Quarantined == nil && !result.Skipped && onResult != nil {
+			if err := onResult(ctx, itemIndex, result.Value, result.Cache); err != nil {
+				return nil, report, fmt.Errorf("step %q item %d: result hook: %w", name, itemIndex, err)
+			}
+		}
 	}
 	return results, report, nil
 }
