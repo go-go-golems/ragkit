@@ -21,6 +21,7 @@ type Budget struct {
 }
 
 var _ Limiter = (*Budget)(nil)
+var _ ReservableLimiter = (*Budget)(nil)
 
 // NewBudget creates a budget with total available resource units.
 func NewBudget(total int) (*Budget, error) {
@@ -32,20 +33,31 @@ func NewBudget(total int) (*Budget, error) {
 
 // Wait atomically charges units or returns ErrBudgetExceeded. It never blocks.
 func (budget *Budget) Wait(ctx context.Context, units int) error {
-	if budget == nil {
-		return fmt.Errorf("budget is nil")
-	}
-	if err := ctx.Err(); err != nil {
+	reservation, err := budget.Reserve(ctx, units)
+	if err != nil {
 		return err
 	}
+	reservation.Commit()
+	return nil
+}
+
+// Reserve provisionally charges units so a composed limiter can refund them
+// if a later admission policy refuses before work starts.
+func (budget *Budget) Reserve(ctx context.Context, units int) (Reservation, error) {
+	if budget == nil {
+		return nil, fmt.Errorf("budget is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if units < 1 {
-		return fmt.Errorf("resource units must be positive")
+		return nil, fmt.Errorf("resource units must be positive")
 	}
 
 	budget.mu.Lock()
 	defer budget.mu.Unlock()
 	if units > budget.remaining {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"%w: requested %d, remaining %d, limit %d",
 			ErrBudgetExceeded,
 			units,
@@ -54,7 +66,11 @@ func (budget *Budget) Wait(ctx context.Context, units int) error {
 		)
 	}
 	budget.remaining -= units
-	return nil
+	return newReservation(func() {
+		budget.mu.Lock()
+		budget.remaining += units
+		budget.mu.Unlock()
+	}), nil
 }
 
 // Limit returns the initial budget.

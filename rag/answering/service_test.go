@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -13,11 +14,29 @@ import (
 type fixedSearcher struct {
 	hits  []rag.Hit
 	query rag.Query
+	calls int
 }
 
 func (s *fixedSearcher) Search(_ context.Context, query rag.Query, _ int) ([]rag.Hit, error) {
+	s.calls++
 	s.query = query
 	return append([]rag.Hit(nil), s.hits...), nil
+}
+
+func TestRRFRejectsNonFiniteConstantsBeforeSearch(t *testing.T) {
+	for name, constant := range map[string]float64{
+		"nan": math.NaN(), "positive infinity": math.Inf(1), "negative infinity": math.Inf(-1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, lexical, vector := serviceFixture()
+			request := requestFixture(StrategyRRF)
+			request.Config.RRFConstant = constant
+			_, err := service.Retrieve(t.Context(), request)
+			require.ErrorContains(t, err, "RRF constant must be finite")
+			require.Zero(t, lexical.calls)
+			require.Zero(t, vector.calls)
+		})
+	}
 }
 
 type reversingReranker struct{ candidates int }

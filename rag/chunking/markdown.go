@@ -75,8 +75,23 @@ func markdownSections(text string) []section {
 	}
 	starts := []int{0}
 	offset := 0
+	var fence byte
+	var fenceWidth int
 	for _, line := range strings.SplitAfter(text, "\n") {
-		if offset > 0 && strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
+		marker, width, closing := markdownFence(line, fence, fenceWidth)
+		if fence != 0 {
+			if closing {
+				fence, fenceWidth = 0, 0
+			}
+			offset += len(line)
+			continue
+		}
+		if marker != 0 {
+			fence, fenceWidth = marker, width
+			offset += len(line)
+			continue
+		}
+		if offset > 0 && isATXHeading(line) {
 			starts = append(starts, offset)
 		}
 		offset += len(line)
@@ -90,4 +105,54 @@ func markdownSections(text string) []section {
 		sections = append(sections, section{start: start, end: end})
 	}
 	return sections
+}
+
+func isATXHeading(line string) bool {
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	indent := 0
+	for indent < len(line) && line[indent] == ' ' {
+		indent++
+	}
+	if indent > 3 || indent == len(line) || line[indent] != '#' {
+		return false
+	}
+	end := indent
+	for end < len(line) && line[end] == '#' {
+		end++
+	}
+	level := end - indent
+	return level >= 1 && level <= 6 && (end == len(line) || line[end] == ' ' || line[end] == '\t')
+}
+
+// markdownFence recognizes CommonMark-style backtick and tilde fences with
+// up to three leading spaces. While a fence is open, heading-looking code is
+// never structural input.
+func markdownFence(line string, open byte, openWidth int) (marker byte, width int, closing bool) {
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	indent := 0
+	for indent < len(line) && line[indent] == ' ' {
+		indent++
+	}
+	if indent > 3 || indent == len(line) {
+		return 0, 0, false
+	}
+	marker = line[indent]
+	if marker != '`' && marker != '~' {
+		return 0, 0, false
+	}
+	end := indent
+	for end < len(line) && line[end] == marker {
+		end++
+	}
+	width = end - indent
+	if width < 3 {
+		return 0, 0, false
+	}
+	if open == 0 {
+		return marker, width, false
+	}
+	if marker == open && width >= openWidth && strings.TrimSpace(line[end:]) == "" {
+		return marker, width, true
+	}
+	return 0, 0, false
 }

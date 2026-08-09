@@ -84,3 +84,11 @@ func TestEvaluateRankingsEmptySetPreservesCutoffs(t *testing.T) {
 		t.Fatal("RecallAt[5] is missing")
 	}
 }
+
+func TestEvaluateRankingsRejectsDuplicateQueryIDs(t *testing.T) {
+	t.Parallel()
+	_, err := EvaluateRankings([]rag.Query{{ID: "q"}, {ID: "q"}}, nil, nil, []int{1})
+	if err == nil {
+		t.Fatal("EvaluateRankings() error = nil")
+	}
+}

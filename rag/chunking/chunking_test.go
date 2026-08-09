@@ -48,3 +48,19 @@ func TestMarkdownStartsChunksAtHeadings(t *testing.T) {
 		t.Fatalf("second chunk = %q", chunks[1].Text)
 	}
 }
+
+func TestMarkdownOnlySplitsAtStructuralATXHeadings(t *testing.T) {
+	t.Parallel()
+	text := "intro\n#hashtag\n    # indented code\n```go\n# fenced code\n```\n~~~\n## fenced too\n~~~\n   ## Real\nbody\n####### not a heading\n"
+	document := rag.Document{ID: "doc", Text: text, ContentDigest: digest.Text(text)}
+	chunks, err := (&Markdown{MaxSectionRunes: 1_000, OverlapRunes: 0}).Chunk(context.Background(), document)
+	if err != nil {
+		t.Fatalf("Chunk() error = %v", err)
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("chunks = %d, want 2: %+v", len(chunks), chunks)
+	}
+	if chunks[1].Text != "   ## Real\nbody\n####### not a heading\n" {
+		t.Fatalf("second chunk = %q", chunks[1].Text)
+	}
+}

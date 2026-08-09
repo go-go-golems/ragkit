@@ -265,6 +265,18 @@ func runBulk[I, O any](
 					}
 					counts.RetriesByClass[lastClass.String()]++
 				})
+				if o.Ledger != nil {
+					for _, group := range current.groups {
+						for _, index := range group.indexes {
+							if err := o.Ledger.Event(ctx, Event{
+								Step: s.Name, Index: index, Type: EventRetry,
+								Class: lastClass.String(), Attempt: attempt, Error: err.Error(),
+							}); err != nil {
+								return struct{}{}, fmt.Errorf("step %q: ledger event: %w", s.Name, err)
+							}
+						}
+					}
+				}
 				continue
 			}
 			break

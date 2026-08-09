@@ -14,6 +14,21 @@ type Limiter interface {
 	Wait(context.Context, int) error
 }
 
+// Reservation represents provisional admission. Commit makes its charge
+// permanent; Rollback restores it when a later limiter refuses the same work.
+type Reservation interface {
+	Commit()
+	Rollback()
+}
+
+// ReservableLimiter lets Chain make composed admission transactional. Built-in
+// budgets and token buckets implement it; custom limiters that only implement
+// Wait remain supported but cannot be rolled back after they succeed.
+type ReservableLimiter interface {
+	Limiter
+	Reserve(context.Context, int) (Reservation, error)
+}
+
 // MapOptions controls bounded parallel work.
 type MapOptions[T any] struct {
 	// Workers is the maximum number of work functions running concurrently.

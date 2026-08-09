@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -110,8 +111,8 @@ func (s *Service) ValidateRequest(request Request) error {
 	}
 	switch request.Config.Strategy {
 	case StrategyRRF, StrategyRRFReranked, StrategyMultiQuery, StrategyHyDE:
-		if request.Config.RRFConstant <= 0 {
-			return errors.New("RRF constant must be greater than zero")
+		if math.IsNaN(request.Config.RRFConstant) || math.IsInf(request.Config.RRFConstant, 0) || request.Config.RRFConstant <= 0 {
+			return errors.New("RRF constant must be finite and greater than zero")
 		}
 	case StrategyBM25, StrategyVector:
 	}

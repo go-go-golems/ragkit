@@ -2,6 +2,7 @@ package lexical
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -24,6 +25,19 @@ func TestBM25FindsMatchingChunk(t *testing.T) {
 	}
 	if len(hits) == 0 || hits[0].ChunkID != "oak" {
 		t.Fatalf("hits = %+v", hits)
+	}
+}
+
+func TestBM25RejectsNonFiniteParameters(t *testing.T) {
+	t.Parallel()
+	chunks := []rag.Chunk{{ID: "chunk", DocumentID: "doc", Text: "oak"}}
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if _, err := Build(generation.Raw(chunks), chunks, Config{K1: value}); err == nil {
+			t.Fatalf("Build(K1=%v) error = nil", value)
+		}
+		if _, err := Build(generation.Raw(chunks), chunks, Config{K1: 1.2, B: &value}); err == nil {
+			t.Fatalf("Build(B=%v) error = nil", value)
+		}
 	}
 }
 

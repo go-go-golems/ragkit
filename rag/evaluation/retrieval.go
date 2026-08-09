@@ -40,6 +40,9 @@ func EvaluateRankings(
 	rankedIDs map[string][]string,
 	cutoffs []int,
 ) (Report, error) {
+	if err := rag.ValidateQueries(queries); err != nil {
+		return Report{}, err
+	}
 	report := Report{
 		RecallAt:  make(map[int]float64, len(cutoffs)),
 		NDCGAt:    make(map[int]float64, len(cutoffs)),

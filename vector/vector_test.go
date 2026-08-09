@@ -51,4 +51,7 @@ func TestNormalize(t *testing.T) {
 	zero := []float32{0, 0}
 	require.NoError(t, Normalize(zero))
 	require.Equal(t, []float32{0, 0}, zero)
+	large := []float32{math.MaxFloat32, math.MaxFloat32}
+	require.NoError(t, Normalize(large))
+	require.InDelta(t, 1, large[0]*large[0]+large[1]*large[1], 1e-5)
 }

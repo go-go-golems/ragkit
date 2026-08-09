@@ -2,7 +2,10 @@ package rag
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
+
+	"github.com/go-go-golems/ragkit/digest"
 )
 
 // ValidateDocument checks the invariants common to every corpus loader.
@@ -15,6 +18,9 @@ func ValidateDocument(document Document) error {
 	}
 	if document.ContentDigest == "" {
 		return fmt.Errorf("document %q content digest is required", document.ID)
+	}
+	if actual := digest.Text(document.Text); actual != document.ContentDigest {
+		return fmt.Errorf("document %q content digest mismatch: stored=%s actual=%s", document.ID, document.ContentDigest, actual)
 	}
 	return nil
 }
@@ -42,8 +48,57 @@ func ValidateChunk(document Document, chunk Chunk) error {
 	if chunk.ContentDigest == "" {
 		return fmt.Errorf("chunk %q content digest is required", chunk.ID)
 	}
+	if actual := digest.Text(chunk.Text); actual != chunk.ContentDigest {
+		return fmt.Errorf("chunk %q content digest mismatch: stored=%s actual=%s", chunk.ID, chunk.ContentDigest, actual)
+	}
 	if chunk.Chunker == "" {
 		return fmt.Errorf("chunk %q chunker is required", chunk.ID)
+	}
+	return nil
+}
+
+// ValidateCorpus checks source identity, uniqueness, and every chunk's exact
+// lineage before a corpus reaches an index backend.
+func ValidateCorpus(documents []Document, chunks []Chunk) error {
+	documentByID := make(map[string]Document, len(documents))
+	for index, document := range documents {
+		if err := ValidateDocument(document); err != nil {
+			return fmt.Errorf("document %d: %w", index, err)
+		}
+		if _, exists := documentByID[document.ID]; exists {
+			return fmt.Errorf("duplicate document ID %q", document.ID)
+		}
+		documentByID[document.ID] = document
+	}
+	chunkIDs := make(map[string]struct{}, len(chunks))
+	for index, chunk := range chunks {
+		if _, exists := chunkIDs[chunk.ID]; exists {
+			return fmt.Errorf("duplicate chunk ID %q", chunk.ID)
+		}
+		chunkIDs[chunk.ID] = struct{}{}
+		document, exists := documentByID[chunk.DocumentID]
+		if !exists {
+			return fmt.Errorf("chunk %d references unknown document %q", index, chunk.DocumentID)
+		}
+		if err := ValidateChunk(document, chunk); err != nil {
+			return fmt.Errorf("chunk %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+// ValidateQueries requires stable, unique query identities before evaluation
+// or aggregation can assign weights to them.
+func ValidateQueries(queries []Query) error {
+	seen := make(map[string]struct{}, len(queries))
+	for index, query := range queries {
+		if strings.TrimSpace(query.ID) == "" {
+			return fmt.Errorf("query %d has no ID", index)
+		}
+		if _, exists := seen[query.ID]; exists {
+			return fmt.Errorf("duplicate query ID %q", query.ID)
+		}
+		seen[query.ID] = struct{}{}
 	}
 	return nil
 }

@@ -21,9 +21,9 @@ func fixtureInput(t *testing.T, outputRoot string) BuildInput {
 	t.Helper()
 	documents := []rag.Document{{
 		ID: "doc-1", Title: "Trees",
-		Text:          "# Oak\nOak trees have lobed leaves.",
-		ContentDigest: "doc-digest",
+		Text: "# Oak\nOak trees have lobed leaves.",
 	}}
+	documents[0].ContentDigest = digest.Text(documents[0].Text)
 	chunker := &chunking.Markdown{MaxSectionRunes: 1200, OverlapRunes: 120}
 	chunks, err := chunking.Apply(t.Context(), chunker, documents)
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestOpenAllowsAdmittedDocumentWithoutChunks(t *testing.T) {
 	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
 	input.Documents = append(input.Documents, rag.Document{
 		ID: "doc-package-only", Title: "Package only", Text: "package trees",
-		ContentDigest: "package-only-digest",
+		ContentDigest: digest.Text("package trees"),
 	})
 	result, err := Build(t.Context(), input)
 	require.NoError(t, err)
@@ -163,6 +163,64 @@ func TestBuildCleansPartialDirectoryOnFailure(t *testing.T) {
 	matches, globErr := filepath.Glob(filepath.Join(root, ".bundle-partial-*"))
 	require.NoError(t, globErr)
 	require.Empty(t, matches)
+}
+
+func TestBuildRejectsInvalidCorpusBeforeCreatingBackends(t *testing.T) {
+	tests := []struct {
+		name   string
+		want   string
+		mutate func(*BuildInput)
+	}{
+		{
+			name: "duplicate document ID", want: "duplicate document ID",
+			mutate: func(input *BuildInput) {
+				input.Documents = append(input.Documents, input.Documents[0])
+			},
+		},
+		{
+			name: "duplicate chunk ID", want: "duplicate chunk ID",
+			mutate: func(input *BuildInput) {
+				input.Chunks = append(input.Chunks, input.Chunks[0])
+			},
+		},
+		{
+			name: "unknown document", want: "references unknown document",
+			mutate: func(input *BuildInput) {
+				input.Chunks[0].DocumentID = "missing"
+			},
+		},
+		{
+			name: "invalid source range", want: "invalid byte range",
+			mutate: func(input *BuildInput) {
+				input.Chunks[0].Range.ByteEnd = len(input.Documents[0].Text) + 1
+			},
+		},
+		{
+			name: "source text mismatch", want: "text does not match its source range",
+			mutate: func(input *BuildInput) {
+				input.Chunks[0].Text = "different"
+				input.Chunks[0].ContentDigest = digest.Text("different")
+			},
+		},
+		{
+			name: "chunk digest mismatch", want: "content digest mismatch",
+			mutate: func(input *BuildInput) {
+				input.Chunks[0].ContentDigest = digest.Text("different")
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "indexes")
+			input := fixtureInput(t, root)
+			test.mutate(&input)
+			_, err := Build(t.Context(), input)
+			require.ErrorContains(t, err, test.want)
+			_, statErr := os.Stat(root)
+			require.ErrorIs(t, statErr, os.ErrNotExist, "corpus validation must run before backend setup")
+		})
+	}
 }
 
 func TestBuildRejectsIncompleteExistingBundle(t *testing.T) {

@@ -78,21 +78,30 @@ func FromChunks(
 // chunk, kind, and generated text. The id includes the text digest so a changed
 // summary produces a different id (and therefore a different cache key).
 func representation(chunk rag.Chunk, kind, text string) (rag.Representation, error) {
+	return representationWithProvenance(chunk, kind, text, "", "")
+}
+
+// representationWithProvenance is the single identity constructor for
+// derived retrieval material. Every field that distinguishes an experiment
+// arm participates in the ID before the representation is returned.
+func representationWithProvenance(chunk rag.Chunk, kind, text, model, promptDigest string) (rag.Representation, error) {
 	identity, err := digest.JSON(struct {
 		ChunkID       string `json:"chunk_id"`
 		ContentDigest string `json:"content_digest"`
 		Kind          string `json:"kind"`
 		TextDigest    string `json:"text_digest"`
+		Model         string `json:"model,omitempty"`
+		PromptDigest  string `json:"prompt_digest,omitempty"`
 	}{
 		ChunkID: chunk.ID, ContentDigest: chunk.ContentDigest,
-		Kind: kind, TextDigest: digest.Text(text),
+		Kind: kind, TextDigest: digest.Text(text), Model: model, PromptDigest: promptDigest,
 	})
 	if err != nil {
 		return rag.Representation{}, fmt.Errorf("build representation identity: %w", err)
 	}
 	return rag.Representation{
 		ID: "rep-" + identity[:16], ChunkID: chunk.ID, Kind: kind,
-		Text: text, ContentDigest: digest.Text(text),
+		Text: text, ContentDigest: digest.Text(text), Model: model, PromptDigest: promptDigest,
 	}, nil
 }
 
@@ -142,7 +151,7 @@ func (s ExtractiveSummarizer) Summarize(_ context.Context, chunk rag.Chunk) (str
 	}
 	// Lead sentence: up to the first period, question mark, or newline, capped
 	// at maxRunes. A summary that is the whole chunk is useless, so cap first.
-	if idx := strings.IndexAny(text, ".\n"); idx > 0 && idx <= max {
+	if idx := strings.IndexAny(text, ".?!\n"); idx > 0 && idx <= max {
 		return text[:idx+1], nil
 	}
 	runes := []rune(text)

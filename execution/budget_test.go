@@ -54,8 +54,45 @@ func TestChainStopsBeforeLaterLimiters(t *testing.T) {
 	}
 }
 
+func TestChainRollsBackEarlierReservationsWhenLaterLimiterRefuses(t *testing.T) {
+	t.Parallel()
+
+	budget, err := NewBudget(2)
+	if err != nil {
+		t.Fatalf("NewBudget() error = %v", err)
+	}
+	err = Chain(budget, rejectingLimiter{}).Wait(context.Background(), 1)
+	if err == nil {
+		t.Fatal("Wait() error = nil, want refusal")
+	}
+	if budget.Remaining() != 2 {
+		t.Fatalf("Remaining() = %d, want rollback to 2", budget.Remaining())
+	}
+}
+
+func TestChainCommitsReservationsAfterAllLimitersAccept(t *testing.T) {
+	t.Parallel()
+
+	budget, err := NewBudget(2)
+	if err != nil {
+		t.Fatalf("NewBudget() error = %v", err)
+	}
+	if err := Chain(budget, &probeLimiter{}).Wait(context.Background(), 1); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if budget.Remaining() != 1 {
+		t.Fatalf("Remaining() = %d, want 1", budget.Remaining())
+	}
+}
+
 type probeLimiter struct {
 	calls int
+}
+
+type rejectingLimiter struct{}
+
+func (rejectingLimiter) Wait(context.Context, int) error {
+	return errors.New("refused")
 }
 
 func (limiter *probeLimiter) Wait(context.Context, int) error {

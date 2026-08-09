@@ -123,11 +123,31 @@ func TestBulkRetriesTransientBatchFailures(t *testing.T) {
 		}
 		return out, nil
 	}, 10)
-	results, report, err := Run(context.Background(), step, []int{1, 2}, Options{Store: NewMemoryStore()})
+	ledger := &recordingLedger{}
+	results, report, err := Run(context.Background(), step, []int{1, 2}, Options{Store: NewMemoryStore(), Ledger: ledger})
 	require.NoError(t, err, "the retry the embeddings incident never had")
 	require.Equal(t, 2, results[0].Value)
 	require.Equal(t, 1, report.Step("flaky-bulk").Retries)
 	require.Equal(t, 2, report.Step("flaky-bulk").WorkCalls)
+	retries := ledger.byType(EventRetry)
+	require.Len(t, retries, 2)
+	for index, event := range retries {
+		require.Equal(t, index, event.Index)
+		require.Equal(t, Transient.String(), event.Class)
+		require.Equal(t, 1, event.Attempt)
+		require.Contains(t, event.Error, "unexpected EOF")
+	}
+}
+
+func TestBulkRetryLedgerFailurePropagates(t *testing.T) {
+	base := bulkStep("retry-ledger-failure")
+	base.Policy.Retry = fastRetry(2)
+	step := Bulk(base, func(context.Context, []int) ([]int, error) {
+		return nil, errors.New("unexpected EOF")
+	}, 10)
+
+	_, _, err := Run(t.Context(), step, []int{1}, Options{Ledger: &recordingLedger{fail: true}})
+	require.ErrorContains(t, err, "ledger event")
 }
 
 func TestBulkFailureModes(t *testing.T) {
