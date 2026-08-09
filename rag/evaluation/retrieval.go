@@ -244,6 +244,9 @@ func ndcg(ids []string, relevant map[string]float64, cutoff int) float64 {
 
 func gain(grade, scale float64, index int) float64 {
 	// Scale every gain by the same 2^-scale factor. The factor cancels in
-	// actual/ideal, while Exp2(grade-scale) cannot overflow.
-	return (math.Exp2(grade-scale) - math.Exp2(-scale)) / math.Log2(float64(index+2))
+	// actual/ideal, while Exp2(grade-scale) cannot overflow. The Expm1 form
+	// preserves a positive gain when grade is tiny: direct subtraction rounds
+	// both terms to the same float64 value.
+	numerator := math.Exp2(grade-scale) * -math.Expm1(-grade*math.Ln2)
+	return numerator / math.Log2(float64(index+2))
 }

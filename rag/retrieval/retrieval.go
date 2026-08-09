@@ -22,6 +22,9 @@ func Collapse(hits []rag.Hit, target Target) ([]rag.Hit, error) {
 	if target != TargetChunk && target != TargetDocument {
 		return nil, fmt.Errorf("unsupported collapse target %q", target)
 	}
+	if err := rag.ValidateHitScores(hits); err != nil {
+		return nil, err
+	}
 	sorted := append([]rag.Hit(nil), hits...)
 	sort.SliceStable(sorted, func(left, right int) bool {
 		if sorted[left].Rank == sorted[right].Rank {
