@@ -48,6 +48,9 @@ func writeBundle(
 		manifest.BundleID = "ttc-test"
 	}
 	manifest.ChunkCount = len(chunks)
+	chunkDigest, err := digest.JSON(chunks)
+	require.NoError(t, err)
+	manifest.ChunkDigest = chunkDigest
 	write := func(name string, value any) {
 		data, err := json.Marshal(value)
 		require.NoError(t, err)
@@ -243,7 +246,7 @@ func TestInspectRefusesAChunkCountThatContradictsTheManifest(t *testing.T) {
 	)
 
 	_, err = Inspect(t.Context(), directory)
-	require.ErrorContains(t, err, "holds 3 chunks but its manifest counts 99")
+	require.ErrorContains(t, err, "holds 3 chunks but manifest counts 99")
 }
 
 func TestInspectRefusesAChunkWhoseTextContradictsItsDigest(t *testing.T) {
@@ -256,6 +259,35 @@ func TestInspectRefusesAChunkWhoseTextContradictsItsDigest(t *testing.T) {
 
 	_, err = Inspect(t.Context(), directory)
 	require.ErrorContains(t, err, "content digest")
+}
+
+func TestInspectRefusesAChangedChunkCommitment(t *testing.T) {
+	chunks := testChunks()
+	directory := writeBundle(t, Manifest{DocumentCount: 2}, chunks)
+	chunks[0].Text = "bbbbbbbbbbbb"
+	chunks[0].ContentDigest = digest.Text(chunks[0].Text)
+	data, err := json.Marshal(chunks)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(directory, chunksName), data, 0o644))
+
+	_, err = Inspect(t.Context(), directory)
+	require.ErrorContains(t, err, "chunk digest differs")
+}
+
+func TestInspectRejectsUnknownFixedSchemaManifestField(t *testing.T) {
+	directory := writeBundle(t, Manifest{DocumentCount: 2}, testChunks())
+	path := filepath.Join(directory, manifestName)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	raw["unknown_future_field"] = true
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+
+	_, err = Inspect(t.Context(), directory)
+	require.ErrorContains(t, err, "unknown field")
 }
 
 // Inspect must open no index. This is the guard that makes the whole decision

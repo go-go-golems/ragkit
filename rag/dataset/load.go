@@ -3,10 +3,10 @@
 package dataset
 
 import (
-	"encoding/json"
 	"os"
 
 	"github.com/go-go-golems/ragkit/digest"
+	"github.com/go-go-golems/ragkit/internal/jsonutil"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/pkg/errors"
 )
@@ -22,8 +22,8 @@ func LoadDocuments(path string) ([]rag.Document, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "read corpus")
 	}
-	var documents []rag.Document
-	if err := json.Unmarshal(data, &documents); err != nil {
+	documents, err := jsonutil.DecodeStrict[[]rag.Document](data)
+	if err != nil {
 		return nil, errors.Wrap(err, "decode corpus")
 	}
 	if len(documents) == 0 {
@@ -40,8 +40,8 @@ func LoadEvaluation(path string) (EvaluationInput, error) {
 	if err != nil {
 		return EvaluationInput{}, errors.Wrap(err, "read evaluation data")
 	}
-	var set rag.EvaluationSet
-	if err := json.Unmarshal(data, &set); err != nil {
+	set, err := jsonutil.DecodeStrict[rag.EvaluationSet](data)
+	if err != nil {
 		return EvaluationInput{}, errors.Wrap(err, "decode evaluation data")
 	}
 	if len(set.Queries) == 0 {

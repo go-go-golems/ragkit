@@ -2,6 +2,7 @@ package generation
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -9,6 +10,26 @@ import (
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/stretchr/testify/require"
 )
+
+type cachedGeneratorBilledFailure struct{}
+
+func (cachedGeneratorBilledFailure) Generate(context.Context, rag.GenerationRequest) (rag.GenerationResult, error) {
+	tokens := int64(7)
+	return rag.GenerationResult{Text: "partial", Usage: rag.Usage{OutputTokens: &tokens}}, errors.New("billed failure")
+}
+
+func TestCachedGeneratorReturnsKnownUsageWithError(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	decorator, err := NewCachedGenerator(cachedGeneratorBilledFailure{}, CachedProviderOptions{
+		Cache: cache, Workers: 1, AdapterVersion: "adapter-v1", ContextPolicy: ContextPolicyNameForTest,
+	})
+	require.NoError(t, err)
+	result, err := decorator.Generate(t.Context(), rag.GenerationRequest{Kind: "answer", Model: "model"})
+	require.ErrorContains(t, err, "billed failure")
+	require.NotNil(t, result.Usage.OutputTokens)
+	require.EqualValues(t, 7, *result.Usage.OutputTokens)
+}
 
 type cachedGeneratorCountingProvider struct{ calls atomic.Int64 }
 

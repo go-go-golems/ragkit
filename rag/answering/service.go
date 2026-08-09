@@ -384,6 +384,10 @@ func (s *Service) search(
 		_ = state.emit(context.WithoutCancel(ctx), stage, ObservationFailed, started, time.Since(started), nil, err.Error())
 		return nil, errors.Wrapf(err, "execute %s search", stage)
 	}
+	if err := rag.ValidateHits(hits); err != nil {
+		_ = state.emit(context.WithoutCancel(ctx), stage, ObservationFailed, started, time.Since(started), nil, err.Error())
+		return nil, errors.Wrapf(err, "validate %s search results", stage)
+	}
 	collapsed, err := retrieval.Collapse(hits, retrieval.TargetChunk)
 	if err != nil {
 		_ = state.emit(context.WithoutCancel(ctx), stage, ObservationFailed, started, time.Since(started), nil, err.Error())
@@ -440,8 +444,13 @@ func (s *Service) interpret(ctx context.Context, prepared Prepared, raw rag.Gene
 	if err := state.emit(ctx, StageContract, ObservationStarted, started, 0, nil, ""); err != nil {
 		return Result{}, err
 	}
+	if s.CitationStyle == CitationStyleOrdinal {
+		if err := validateCitationLabels(prepared); err != nil {
+			return Result{}, err
+		}
+	}
 	answer, contract := ParseGroundedAnswer(raw.Text, prepared.Context.Evidence)
-	if contract.Valid && len(prepared.CitationLabels) > 0 {
+	if contract.Valid && s.CitationStyle == CitationStyleOrdinal {
 		for index, label := range answer.CitationChunkIDs {
 			chunkID, ok := prepared.CitationLabels[label]
 			if !ok {
@@ -639,8 +648,8 @@ func validateRerankedEvidence(candidates, returned []rag.Evidence, requested int
 			return nil, errors.Errorf("reranker returned duplicate chunk %q", id)
 		}
 		seen[id] = true
-		if score := item.RerankerScore; score != nil && (math.IsNaN(*score) || math.IsInf(*score, 0)) {
-			return nil, errors.Errorf("reranker result %d for chunk %q has a non-finite score", index, id)
+		if err := validateEvidenceScores("reranker", index, item); err != nil {
+			return nil, err
 		}
 		candidate.Rank = index + 1
 		candidate.RerankerScore = item.RerankerScore
@@ -669,10 +678,50 @@ func validateAugmentedEvidence(chunks []rag.Chunk, returned []rag.Evidence) ([]r
 			return nil, errors.Errorf("augmenter returned duplicate chunk %q", id)
 		}
 		seen[id] = struct{}{}
+		if err := validateEvidenceScores("augmenter", index, item); err != nil {
+			return nil, err
+		}
 		item.Chunk = chunk
 		validated[index] = item
 	}
 	return validated, nil
+}
+
+func validateEvidenceScores(role string, index int, item rag.Evidence) error {
+	if math.IsNaN(item.RetrievalScore) || math.IsInf(item.RetrievalScore, 0) {
+		return errors.Errorf("%s result %d for chunk %q has a non-finite retrieval score", role, index, item.Chunk.ID)
+	}
+	if score := item.RerankerScore; score != nil && (math.IsNaN(*score) || math.IsInf(*score, 0)) {
+		return errors.Errorf("%s result %d for chunk %q has a non-finite reranker score", role, index, item.Chunk.ID)
+	}
+	return nil
+}
+
+func validateCitationLabels(prepared Prepared) error {
+	authorized := ApplyContextPolicy(
+		prepared.Retrieval.Evidence,
+		prepared.Request.Config.EvidenceK,
+		prepared.Request.Config.MaximumContextRunes,
+	).Evidence
+	if len(prepared.CitationLabels) != len(authorized) {
+		return errors.Errorf("citation label mapping has %d entries, want %d", len(prepared.CitationLabels), len(authorized))
+	}
+	seen := make(map[string]struct{}, len(authorized))
+	for index, evidence := range authorized {
+		label := fmt.Sprintf("E%d", index+1)
+		chunkID, ok := prepared.CitationLabels[label]
+		if !ok {
+			return errors.Errorf("citation label mapping is missing %q", label)
+		}
+		if chunkID != evidence.Chunk.ID {
+			return errors.Errorf("citation label %q maps to unauthorized chunk %q", label, chunkID)
+		}
+		if _, duplicate := seen[chunkID]; duplicate {
+			return errors.Errorf("citation label mapping duplicates chunk %q", chunkID)
+		}
+		seen[chunkID] = struct{}{}
+	}
+	return nil
 }
 
 // generateHypothetical asks the generator for a hypothetical answer whose

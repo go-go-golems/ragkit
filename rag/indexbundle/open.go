@@ -2,13 +2,13 @@ package indexbundle
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 
 	"github.com/go-go-golems/ragkit/digest"
+	"github.com/go-go-golems/ragkit/internal/jsonutil"
 	"github.com/go-go-golems/ragkit/rag"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
@@ -32,20 +32,11 @@ func LoadManifest(path string) (Manifest, error) {
 }
 
 func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	manifest, err := LoadManifest(options.Path)
-	if err != nil {
-		return nil, errors.Wrap(err, "load index bundle manifest")
-	}
-	data, err := loadData(options.Path, manifest)
+	verified, err := loadVerifiedBundle(ctx, options.Path)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateStoredIdentity(manifest, data); err != nil {
-		return nil, err
-	}
+	manifest := verified.manifest
 	// Lexical-only bundles (no vector identity) are a supported serving and
 	// rollback configuration: they open without an embedder and expose a nil
 	// Vector index.
@@ -90,13 +81,111 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 		}
 	}
 	return &Bundle{
-		Manifest: manifest, Chunks: data.chunks,
-		Representations: data.representations,
+		Manifest: manifest, Chunks: verified.chunks,
+		Representations: verified.representations,
 		Lexical:         lexical, Vector: vector,
 	}, nil
 }
 
-func validateStoredIdentity(manifest Manifest, data bundleData) error {
+type verifiedManifest struct {
+	path     string
+	manifest Manifest
+}
+
+type verifiedChunks struct {
+	verifiedManifest
+	chunks []rag.Chunk
+}
+
+type verifiedData struct {
+	verifiedChunks
+	representations []rag.Representation
+}
+
+func loadVerifiedManifest(ctx context.Context, path string) (verifiedManifest, error) {
+	if err := ctx.Err(); err != nil {
+		return verifiedManifest{}, err
+	}
+	manifest, err := LoadManifest(path)
+	if err != nil {
+		return verifiedManifest{}, errors.Wrap(err, "load index bundle manifest")
+	}
+	return verifiedManifest{path: path, manifest: manifest}, nil
+}
+
+func loadVerifiedChunks(ctx context.Context, state verifiedManifest) (verifiedChunks, error) {
+	if err := ctx.Err(); err != nil {
+		return verifiedChunks{}, err
+	}
+	var chunks []rag.Chunk
+	if err := readJSON(filepath.Join(state.path, chunksName), &chunks); err != nil {
+		return verifiedChunks{}, errors.Wrap(err, "load bundle chunks")
+	}
+	if len(chunks) != state.manifest.ChunkCount {
+		return verifiedChunks{}, errors.Errorf(
+			"bundle data counts differ from manifest: holds %d chunks but manifest counts %d",
+			len(chunks), state.manifest.ChunkCount,
+		)
+	}
+	if err := validateStoredChunks(chunks, state.manifest.DocumentCount); err != nil {
+		return verifiedChunks{}, errors.Wrap(err, "validate bundle chunks")
+	}
+	chunkDigest, err := digest.JSON(chunks)
+	if err != nil {
+		return verifiedChunks{}, errors.Wrap(err, "digest bundle chunks")
+	}
+	if chunkDigest != state.manifest.ChunkDigest {
+		return verifiedChunks{}, errors.New("bundle chunk digest differs from manifest")
+	}
+	if err := ctx.Err(); err != nil {
+		return verifiedChunks{}, err
+	}
+	return verifiedChunks{verifiedManifest: state, chunks: chunks}, nil
+}
+
+func loadVerifiedData(ctx context.Context, state verifiedChunks) (verifiedData, error) {
+	if err := ctx.Err(); err != nil {
+		return verifiedData{}, err
+	}
+	manifest := state.manifest
+	path := state.path
+	var representations []rag.Representation
+	if err := readJSON(filepath.Join(path, representationsName), &representations); err != nil {
+		return verifiedData{}, errors.Wrap(err, "load bundle representations")
+	}
+	if len(representations) != manifest.RepresentationCount {
+		return verifiedData{}, errors.New("bundle representation count differs from manifest")
+	}
+	if err := rag.ValidateRepresentations(state.chunks, representations); err != nil {
+		return verifiedData{}, errors.Wrap(err, "validate bundle representations")
+	}
+	if err := ctx.Err(); err != nil {
+		return verifiedData{}, err
+	}
+	verified := verifiedData{verifiedChunks: state, representations: representations}
+	if err := validateBackendIdentity(ctx, verified); err != nil {
+		return verifiedData{}, err
+	}
+	if err := validateStoredIdentity(verified); err != nil {
+		return verifiedData{}, err
+	}
+	return verified, nil
+}
+
+func loadVerifiedBundle(ctx context.Context, path string) (verifiedData, error) {
+	manifest, err := loadVerifiedManifest(ctx, path)
+	if err != nil {
+		return verifiedData{}, err
+	}
+	chunks, err := loadVerifiedChunks(ctx, manifest)
+	if err != nil {
+		return verifiedData{}, err
+	}
+	return loadVerifiedData(ctx, chunks)
+}
+
+func validateStoredIdentity(data verifiedData) error {
+	manifest := data.manifest
 	chunkDigest, err := digest.JSON(data.chunks)
 	if err != nil {
 		return err
@@ -114,7 +203,7 @@ func validateStoredIdentity(manifest Manifest, data bundleData) error {
 		return err
 	}
 	if expectedID != manifest.BundleID || chunkDigest != manifest.ChunkDigest || !reflect.DeepEqual(kinds, manifest.RepresentationKinds) {
-		return errors.New("bundle manifest identity does not match stored data")
+		return errors.New("bundle identity does not match stored data")
 	}
 	if manifest.Vector != nil {
 		if manifest.Vector.RepresentationDigest != representationDigest {
@@ -124,65 +213,50 @@ func validateStoredIdentity(manifest Manifest, data bundleData) error {
 	return nil
 }
 
-type bundleData struct {
-	chunks          []rag.Chunk
-	representations []rag.Representation
-}
-
-func loadData(path string, manifest Manifest) (bundleData, error) {
-	var chunks []rag.Chunk
-	if err := readJSON(filepath.Join(path, chunksName), &chunks); err != nil {
-		return bundleData{}, errors.Wrap(err, "load bundle chunks")
-	}
-	var representations []rag.Representation
-	if err := readJSON(filepath.Join(path, representationsName), &representations); err != nil {
-		return bundleData{}, errors.Wrap(err, "load bundle representations")
-	}
-	if len(chunks) != manifest.ChunkCount ||
-		len(representations) != manifest.RepresentationCount {
-		return bundleData{}, errors.New("bundle data counts differ from manifest")
-	}
-	if err := validateStoredChunks(chunks, manifest.DocumentCount); err != nil {
-		return bundleData{}, err
-	}
-	if err := rag.ValidateRepresentations(chunks, representations); err != nil {
-		return bundleData{}, errors.Wrap(err, "validate bundle representations")
-	}
+func validateBackendIdentity(ctx context.Context, data verifiedData) error {
+	manifest := data.manifest
+	path := data.path
 	bleveData, err := os.ReadFile(filepath.Join(path, bleveName, "rag-manifest.json"))
 	if err != nil {
-		return bundleData{}, errors.Wrap(err, "read bundle lexical manifest")
+		return errors.Wrap(err, "read bundle lexical manifest")
 	}
-	var lexicalManifest bleveindex.Manifest
-	if err := json.Unmarshal(bleveData, &lexicalManifest); err != nil {
-		return bundleData{}, errors.Wrap(err, "decode bundle lexical manifest")
+	lexicalManifest, err := jsonutil.DecodeStrict[bleveindex.Manifest](bleveData)
+	if err != nil {
+		return errors.Wrap(err, "decode bundle lexical manifest")
 	}
 	if lexicalIdentity(lexicalManifest) != manifest.Lexical ||
 		lexicalManifest.RepresentationCount != manifest.RepresentationCount {
-		return bundleData{}, errors.New("bundle lexical identity differs from manifest")
+		return errors.New("bundle lexical identity differs from manifest")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	lexicalDigest, err := bleveindex.InspectContentDigest(filepath.Join(path, bleveName))
 	if err != nil {
-		return bundleData{}, errors.Wrap(err, "inspect bundle lexical content")
+		return errors.Wrap(err, "inspect bundle lexical content")
 	}
 	if lexicalDigest != manifest.Lexical.ContentDigest {
-		return bundleData{}, errors.New("bundle lexical content differs from manifest")
+		return errors.New("bundle lexical content differs from manifest")
 	}
 	if manifest.Vector != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		vectorManifest, err := sqliteexact.Inspect(filepath.Join(path, vectorName))
 		if err != nil {
-			return bundleData{}, errors.Wrap(err, "inspect bundle vector index")
+			return errors.Wrap(err, "inspect bundle vector index")
 		}
 		if vectorManifest.Model != manifest.Vector.Model ||
 			vectorManifest.Dimensions != manifest.Vector.Dimensions ||
 			vectorManifest.RepresentationCount != manifest.RepresentationCount ||
 			vectorManifest.ContentDigest != manifest.Vector.ContentDigest {
-			return bundleData{}, errors.New("bundle vector identity differs from manifest")
+			return errors.New("bundle vector identity differs from manifest")
 		}
 	}
 	// Corpus identity cannot be reconstructed from chunks because overlap and
 	// Markdown boundaries duplicate text. Persist the digest check through the
 	// manifest and bundle ID; callers validate source corpus when building.
-	return bundleData{chunks: chunks, representations: representations}, nil
+	return ctx.Err()
 }
 
 func validateStoredChunks(chunks []rag.Chunk, documentCount int) error {
@@ -230,7 +304,7 @@ func readJSON(path string, target any) error {
 	if err != nil {
 		return errors.Wrap(err, "read JSON")
 	}
-	if err := json.Unmarshal(data, target); err != nil {
+	if err := jsonutil.DecodeStrictInto(data, target); err != nil {
 		return errors.Wrap(err, "decode JSON")
 	}
 	return nil

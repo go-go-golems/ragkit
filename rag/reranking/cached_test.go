@@ -170,6 +170,17 @@ func TestCachedReportsUsageFromFailedProviderCall(t *testing.T) {
 	require.Equal(t, int64(8), *report.Usage.InputTokens)
 }
 
+func TestCachedRerankerReturnsKnownUsageWithError(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	decorator, err := NewCachedReranker(failedUsageReranker{}, cachedOptions(cache, nil))
+	require.NoError(t, err)
+	result, err := decorator.Rerank(t.Context(), rerankingRequest("one"))
+	require.ErrorContains(t, err, "provider failed")
+	require.NotNil(t, result.Usage.InputTokens)
+	require.EqualValues(t, 8, *result.Usage.InputTokens)
+}
+
 func TestCachedRerankerDecoratesSingleRequestInterface(t *testing.T) {
 	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
 	require.NoError(t, err)

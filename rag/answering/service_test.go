@@ -306,6 +306,21 @@ func TestOrdinalCitationsRejectUnknownLabels(t *testing.T) {
 	require.Equal(t, AnswerFailureContract, result.Contract.FailureCategory)
 }
 
+func TestOrdinalCitationsRejectMutatedLabelMapping(t *testing.T) {
+	service, _, _ := serviceFixture()
+	service.CitationStyle = CitationStyleOrdinal
+	request := requestFixture(StrategyBM25)
+	retrieved, err := service.Retrieve(t.Context(), request)
+	require.NoError(t, err)
+	prepared, err := service.Prepare(t.Context(), request, retrieved)
+	require.NoError(t, err)
+	prepared.CitationLabels["E1"] = "chunk-c"
+	_, err = service.Interpret(t.Context(), prepared, rag.GenerationResult{
+		Text: `{"answer":"A.","citation_chunk_ids":["E1"],"abstained":false}`,
+	})
+	require.ErrorContains(t, err, "unauthorized chunk")
+}
+
 type traceAugmenter struct{}
 
 func (traceAugmenter) Augment(_ context.Context, result RetrievalResult, _ []rag.Chunk) (RetrievalResult, json.RawMessage, error) {
@@ -342,6 +357,27 @@ func TestRetrieveRejectsUnknownAugmenterEvidence(t *testing.T) {
 	service.Augmenter = tamperingAugmenter{evidence: []rag.Evidence{{Chunk: rag.Chunk{ID: "unknown"}}}}
 	_, err := service.Retrieve(t.Context(), requestFixture(StrategyBM25))
 	require.ErrorContains(t, err, "unknown chunk")
+}
+
+func TestRetrieveRejectsNonFiniteAugmenterScores(t *testing.T) {
+	for name, evidence := range map[string]rag.Evidence{
+		"retrieval": {Chunk: rag.Chunk{ID: "chunk-a"}, RetrievalScore: math.NaN()},
+		"reranker":  {Chunk: rag.Chunk{ID: "chunk-a"}, RerankerScore: float64Pointer(math.Inf(1))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, _, _ := serviceFixture()
+			service.Augmenter = tamperingAugmenter{evidence: []rag.Evidence{evidence}}
+			_, err := service.Retrieve(t.Context(), requestFixture(StrategyBM25))
+			require.ErrorContains(t, err, "non-finite")
+		})
+	}
+}
+
+func TestRetrieveRejectsNonFiniteSearchHitScore(t *testing.T) {
+	service, lexical, _ := serviceFixture()
+	lexical.hits[0].Score = math.NaN()
+	_, err := service.Retrieve(t.Context(), requestFixture(StrategyBM25))
+	require.ErrorContains(t, err, "validate lexical search results")
 }
 
 func TestValidateRequestRejectsUnknownCitationStyle(t *testing.T) {

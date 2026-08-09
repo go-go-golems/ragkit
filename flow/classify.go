@@ -191,7 +191,7 @@ func (defaultClassifier) Classify(err error) ErrorClass {
 	if errors.As(err, &status) {
 		code := status.HTTPStatus()
 		switch {
-		case code == 429 || code == 408 || code >= 500:
+		case code == 429 || code == 408 || (code >= 500 && code < 600):
 			return Transient
 		default:
 			return Fatal

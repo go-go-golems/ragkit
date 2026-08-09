@@ -36,6 +36,20 @@ func fastRetry(attempts int) RetrySpec {
 	return RetrySpec{Attempts: attempts, Backoff: Backoff{Base: time.Millisecond, Cap: 2 * time.Millisecond}}
 }
 
+func TestRetryArithmeticSaturatesAtCap(t *testing.T) {
+	cap := time.Duration(math.MaxInt64)
+	require.Equal(t, cap, nextRetryDelay(cap-1, cap))
+	require.Equal(t, cap, nextRetryDelay(cap/2+1, cap))
+	require.Equal(t, 2*time.Second, nextRetryDelay(time.Second, cap))
+	require.Equal(t, time.Duration(0), nextRetryDelay(time.Second, 0))
+
+	for range 100 {
+		delay := retryDelay(cap, cap)
+		require.GreaterOrEqual(t, delay, time.Duration(0))
+		require.LessOrEqual(t, delay, cap)
+	}
+}
+
 func TestRunPreservesOrderUnderSkewedLatencies(t *testing.T) {
 	step := Step[int, string]{
 		Name: "skewed",

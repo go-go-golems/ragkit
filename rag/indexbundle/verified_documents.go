@@ -2,12 +2,12 @@ package indexbundle
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-go-golems/ragkit/digest"
+	"github.com/go-go-golems/ragkit/internal/jsonutil"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/pkg/errors"
 )
@@ -20,17 +20,11 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	manifest, err := LoadManifest(bundlePath)
+	verified, err := loadVerifiedBundle(ctx, bundlePath)
 	if err != nil {
-		return nil, errors.Wrap(err, "load index bundle manifest")
+		return nil, errors.Wrap(err, "verify index bundle data")
 	}
-	bundleContents, err := loadData(bundlePath, manifest)
-	if err != nil {
-		return nil, errors.Wrap(err, "load index bundle data")
-	}
-	if err := validateStoredIdentity(manifest, bundleContents); err != nil {
-		return nil, errors.Wrap(err, "validate index bundle identity")
-	}
+	manifest := verified.manifest
 	corpusPath, err := resolveVerifiedCorpusPath(corpusRoot, manifest.CorpusPath)
 	if err != nil {
 		return nil, err
@@ -42,8 +36,8 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var documents []rag.Document
-	if err := json.Unmarshal(data, &documents); err != nil {
+	documents, err := jsonutil.DecodeStrict[[]rag.Document](data)
+	if err != nil {
 		return nil, errors.Wrap(err, "decode index bundle source corpus")
 	}
 	if len(documents) != manifest.DocumentCount {
@@ -66,6 +60,9 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	}
 	if actualDigest != manifest.CorpusDigest {
 		return nil, errors.Errorf("source corpus digest %q differs from bundle manifest digest %q", actualDigest, manifest.CorpusDigest)
+	}
+	if err := rag.ValidateCorpus(documents, verified.chunks); err != nil {
+		return nil, errors.Wrap(err, "validate source corpus lineage")
 	}
 	return append([]rag.Document(nil), documents...), nil
 }

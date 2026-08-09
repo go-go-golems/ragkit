@@ -129,7 +129,9 @@ func (e *CachedEmbedder) Embed(ctx context.Context, request rag.EmbeddingRequest
 		e.mutex.Unlock()
 	}
 	if err != nil {
-		return rag.EmbeddingResult{}, err
+		// MapCached cannot promise an aligned vector batch after one item fails,
+		// but provider work before that failure may still have been billed.
+		return rag.EmbeddingResult{Usage: usage.Snapshot()}, err
 	}
 	for index, vector := range vectors {
 		if len(vector) == 0 {

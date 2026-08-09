@@ -2,14 +2,13 @@ package indexbundle
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 
 	"github.com/go-go-golems/ragkit/digest"
+	"github.com/go-go-golems/ragkit/internal/jsonutil"
 	"github.com/go-go-golems/ragkit/rag"
-	"github.com/pkg/errors"
 )
 
 // CorpusState says what happened when the reader tried to name the documents.
@@ -105,46 +104,37 @@ type Inspection struct {
 // than Build, and every count a caller derives from the chunks would be
 // silently wrong.
 func Inspect(ctx context.Context, path string) (*Inspection, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	manifest, err := LoadManifest(path)
+	manifestState, err := loadVerifiedManifest(ctx, path)
 	if err != nil {
-		return nil, errors.Wrap(err, "load index bundle manifest")
-	}
-	var chunks []rag.Chunk
-	if err := readJSON(filepath.Join(path, chunksName), &chunks); err != nil {
-		return nil, errors.Wrap(err, "load bundle chunks")
-	}
-	if len(chunks) != manifest.ChunkCount {
-		return nil, errors.Errorf(
-			"bundle holds %d chunks but its manifest counts %d",
-			len(chunks), manifest.ChunkCount,
-		)
-	}
-	if err := validateStoredChunks(chunks, manifest.DocumentCount); err != nil {
-		return nil, errors.Wrap(err, "validate bundle chunks")
-	}
-	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	corpus, documents := readCorpus(manifest)
+	chunksState, err := loadVerifiedChunks(ctx, manifestState)
+	if err != nil {
+		return nil, err
+	}
+	corpus, documents, err := readCorpus(ctx, chunksState.manifest)
+	if err != nil {
+		return nil, err
+	}
 	return &Inspection{
-		Path: path, Manifest: manifest, Chunks: chunks,
-		Documents: joinDocuments(chunks, documents), Corpus: corpus,
+		Path: path, Manifest: chunksState.manifest, Chunks: chunksState.chunks,
+		Documents: joinDocuments(chunksState.chunks, documents), Corpus: corpus,
 	}, nil
 }
 
 // readCorpus resolves the corpus named by the manifest. It never returns an
 // error: every failure is a CorpusState with a stated reason.
-func readCorpus(manifest Manifest) (Corpus, map[string]rag.Document) {
+func readCorpus(ctx context.Context, manifest Manifest) (Corpus, map[string]rag.Document, error) {
 	corpus := Corpus{
 		Path: manifest.CorpusPath, ExpectedDigest: manifest.CorpusDigest,
 	}
 	if corpus.Path == "" {
 		corpus.State = CorpusAbsent
 		corpus.Reason = "the manifest records no corpus path"
-		return corpus, nil
+		return corpus, nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return Corpus{}, nil, err
 	}
 	data, err := os.ReadFile(corpus.Path)
 	if err != nil {
@@ -160,13 +150,16 @@ func readCorpus(manifest Manifest) (Corpus, map[string]rag.Document) {
 				corpus.Reason += " (resolved against " + working + ")"
 			}
 		}
-		return corpus, nil
+		return corpus, nil, nil
 	}
-	var documents []rag.Document
-	if err := json.Unmarshal(data, &documents); err != nil {
+	if err := ctx.Err(); err != nil {
+		return Corpus{}, nil, err
+	}
+	documents, err := jsonutil.DecodeStrict[[]rag.Document](data)
+	if err != nil {
 		corpus.State = CorpusAbsent
 		corpus.Reason = "cannot decode " + corpus.Path + ": " + err.Error()
-		return corpus, nil
+		return corpus, nil, nil
 	}
 	// The digest is over the decoded documents, not over the file bytes,
 	// because that is what CalculateID does. Hashing the bytes here would
@@ -175,7 +168,7 @@ func readCorpus(manifest Manifest) (Corpus, map[string]rag.Document) {
 	if err != nil {
 		corpus.State = CorpusAbsent
 		corpus.Reason = "cannot digest " + corpus.Path + ": " + err.Error()
-		return corpus, nil
+		return corpus, nil, nil
 	}
 	corpus.ActualDigest = actual
 	byID := make(map[string]rag.Document, len(documents))
@@ -187,10 +180,10 @@ func readCorpus(manifest Manifest) (Corpus, map[string]rag.Document) {
 		corpus.Reason = corpus.Path +
 			" has changed since the bundle was built; a title may not describe" +
 			" the text the chunks hold"
-		return corpus, byID
+		return corpus, byID, nil
 	}
 	corpus.State = CorpusMatches
-	return corpus, byID
+	return corpus, byID, nil
 }
 
 // joinDocuments rolls the chunks up per document and attaches whatever the
