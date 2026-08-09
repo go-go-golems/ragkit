@@ -5,11 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
 )
 
 func snapDocument(text string) rag.Document {
-	return rag.Document{ID: "doc-1", Title: "T", Text: text, ContentDigest: "d"}
+	return rag.Document{ID: "doc-1", Title: "T", Text: text, ContentDigest: digest.Text(text)}
 }
 
 func TestSentenceSnapEndsChunksAtSentenceBoundaries(t *testing.T) {

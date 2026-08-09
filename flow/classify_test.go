@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -10,6 +11,19 @@ import (
 
 	"github.com/go-go-golems/ragkit/execution"
 )
+
+func TestErrorClassJSONRoundTrip(t *testing.T) {
+	for _, class := range []ErrorClass{Transient, DataError, Fatal} {
+		encoded, err := json.Marshal(class)
+		require.NoError(t, err)
+		var decoded ErrorClass
+		require.NoError(t, json.Unmarshal(encoded, &decoded))
+		require.Equal(t, class, decoded)
+	}
+
+	var decoded ErrorClass
+	require.Error(t, json.Unmarshal([]byte(`"unknown"`), &decoded))
+}
 
 // Every fallback marker must name the incident that earned its place: the
 // table grew one corpse at a time, and this test keeps that discipline.

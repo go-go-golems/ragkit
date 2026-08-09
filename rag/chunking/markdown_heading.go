@@ -3,7 +3,6 @@ package chunking
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
@@ -186,9 +185,3 @@ func mergeSmallSections(sections []section, minRunes int, text string) []section
 // and are no longer needed: the whole-section path now uses digest.JSON and
 // digest.Text directly, the same helpers fixedRange uses, so chunk ids stay
 // comparable across chunkers.
-
-// headingLine reports whether a line is a Markdown heading. Exported as a
-// lowercase helper so tests in this package can exercise the boundary.
-func headingLine(line string) bool {
-	return strings.HasPrefix(strings.TrimLeft(line, " \t"), "#")
-}

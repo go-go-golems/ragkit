@@ -284,13 +284,7 @@ func generatePerChunk(
 // and the prompt digest travel with the representation, so a bundle built from
 // lab output records how its retrieval material came to be.
 func generated(chunk rag.Chunk, kind, text, model, prompt string) (rag.Representation, error) {
-	rep, err := representation(chunk, kind, text)
-	if err != nil {
-		return rag.Representation{}, err
-	}
-	rep.Model = model
-	rep.PromptDigest = digest.Text(prompt)
-	return rep, nil
+	return representationWithProvenance(chunk, kind, text, model, digest.Text(prompt))
 }
 
 // contextualInput renders the per-chunk contextual prompt input. The batched

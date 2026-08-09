@@ -39,7 +39,28 @@ func (class ErrorClass) String() string {
 
 // MarshalText serializes the class name into quarantine records.
 func (class ErrorClass) MarshalText() ([]byte, error) {
+	if class < Transient || class > Fatal {
+		return nil, fmt.Errorf("unknown error class %d", class)
+	}
 	return []byte(class.String()), nil
+}
+
+// UnmarshalText restores the stable names emitted by MarshalText.
+func (class *ErrorClass) UnmarshalText(text []byte) error {
+	if class == nil {
+		return errors.New("error class destination is nil")
+	}
+	switch string(text) {
+	case "transient":
+		*class = Transient
+	case "data":
+		*class = DataError
+	case "fatal":
+		*class = Fatal
+	default:
+		return fmt.Errorf("unknown error class %q", text)
+	}
+	return nil
 }
 
 // Classifier assigns one item error its class.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/ragkit/internal/fsutil"
+	"github.com/go-go-golems/ragkit/rag"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/pkg/errors"
@@ -156,6 +157,9 @@ func validateBuildInput(input BuildInput) error {
 	}
 	if len(input.Documents) == 0 || len(input.Chunks) == 0 || len(input.Representations) == 0 {
 		return errors.New("bundle documents, chunks, and representations are required")
+	}
+	if err := rag.ValidateCorpus(input.Documents, input.Chunks); err != nil {
+		return errors.Wrap(err, "validate bundle corpus")
 	}
 	if strings.TrimSpace(input.Chunker.Name) == "" || input.Chunker.MaximumRunes <= 0 ||
 		input.Chunker.OverlapRunes < 0 || input.Chunker.OverlapRunes >= input.Chunker.MaximumRunes {

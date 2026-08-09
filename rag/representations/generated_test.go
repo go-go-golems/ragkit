@@ -135,6 +135,28 @@ func TestGeneratedSummariesSkipsEmptyResponses(t *testing.T) {
 	}
 }
 
+func TestGeneratedRepresentationIdentityIncludesModelAndPrompt(t *testing.T) {
+	_, chunks := labChunks()
+	base, err := generated(chunks[0], KindSummary, "same generated text", "model-a", "prompt-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherModel, err := generated(chunks[0], KindSummary, "same generated text", "model-b", "prompt-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPrompt, err := generated(chunks[0], KindSummary, "same generated text", "model-a", "prompt-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.ID == otherModel.ID || base.ID == otherPrompt.ID || otherModel.ID == otherPrompt.ID {
+		t.Fatalf("generated IDs must distinguish provenance: %q %q %q", base.ID, otherModel.ID, otherPrompt.ID)
+	}
+	if base.Model != "model-a" || base.PromptDigest == "" {
+		t.Fatalf("provenance missing from representation: %+v", base)
+	}
+}
+
 func TestBuildersRefuseNilGenerate(t *testing.T) {
 	documents, chunks := labChunks()
 	if _, err := Contextual(context.Background(), documents, chunks, nil, ContextualSpec{}); err == nil {

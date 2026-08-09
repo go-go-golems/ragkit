@@ -28,6 +28,7 @@ type TokenBucket struct {
 }
 
 var _ Limiter = (*TokenBucket)(nil)
+var _ ReservableLimiter = (*TokenBucket)(nil)
 
 // NewTokenBucket creates a full token bucket and starts its replenisher.
 func NewTokenBucket(rate Rate) (*TokenBucket, error) {
@@ -80,41 +81,51 @@ func (limiter *TokenBucket) replenish(interval time.Duration) {
 // Wait acquires units from the bucket. If the context is canceled after a
 // partial acquisition, already-acquired units are returned.
 func (limiter *TokenBucket) Wait(ctx context.Context, units int) error {
+	reservation, err := limiter.Reserve(ctx, units)
+	if err != nil {
+		return err
+	}
+	reservation.Commit()
+	return nil
+}
+
+// Reserve acquires tokens provisionally for transactional limiter chains.
+func (limiter *TokenBucket) Reserve(ctx context.Context, units int) (Reservation, error) {
 	if limiter == nil {
-		return fmt.Errorf("token bucket is nil")
+		return nil, fmt.Errorf("token bucket is nil")
 	}
 	if units < 1 {
-		return fmt.Errorf("resource units must be positive")
+		return nil, fmt.Errorf("resource units must be positive")
 	}
 	if units > cap(limiter.tokens) {
-		return fmt.Errorf("resource units %d exceed burst %d", units, cap(limiter.tokens))
+		return nil, fmt.Errorf("resource units %d exceed burst %d", units, cap(limiter.tokens))
 	}
 	if limiter.closed.Load() {
-		return fmt.Errorf("token bucket is closed")
+		return nil, fmt.Errorf("token bucket is closed")
 	}
 
 	acquired := 0
 	for acquired < units {
 		if limiter.closed.Load() {
 			limiter.refund(acquired)
-			return fmt.Errorf("token bucket is closed")
+			return nil, fmt.Errorf("token bucket is closed")
 		}
 		select {
 		case <-ctx.Done():
 			limiter.refund(acquired)
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-limiter.done:
 			limiter.refund(acquired)
-			return fmt.Errorf("token bucket is closed")
+			return nil, fmt.Errorf("token bucket is closed")
 		case <-limiter.tokens:
 			acquired++
 			if limiter.closed.Load() {
 				limiter.refund(acquired)
-				return fmt.Errorf("token bucket is closed")
+				return nil, fmt.Errorf("token bucket is closed")
 			}
 		}
 	}
-	return nil
+	return newReservation(func() { limiter.refund(units) }), nil
 }
 
 func (limiter *TokenBucket) refund(units int) {

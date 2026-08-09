@@ -2,7 +2,9 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -77,6 +79,55 @@ func TestRepresentationsPreservesMissingUsage(t *testing.T) {
 	if usage != (rag.Usage{}) {
 		t.Fatalf("usage = %+v, want all fields nil", usage)
 	}
+}
+
+func TestRepresentationsReturnsAccumulatedUsageOnLaterBatchFailure(t *testing.T) {
+	t.Parallel()
+	used := int64(7)
+	embedder := &scriptedEmbedder{results: []scriptedEmbeddingResult{
+		{result: rag.EmbeddingResult{Vectors: [][]float32{{1, 0}}, Usage: rag.Usage{EmbeddingTokens: &used}}},
+		{err: errors.New("provider unavailable")},
+	}}
+	reps := []rag.Representation{{ID: "1", Text: "oak"}, {ID: "2", Text: "pine"}}
+	vectors, usage, err := Representations(context.Background(), embedder, "model", reps, 1)
+	if err == nil || !strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("Representations() error = %v, want provider failure", err)
+	}
+	if vectors != nil {
+		t.Fatalf("vectors = %+v, want nil on incomplete result", vectors)
+	}
+	if usage.EmbeddingTokens == nil || *usage.EmbeddingTokens != 7 {
+		t.Fatalf("EmbeddingTokens = %v, want accumulated 7", usage.EmbeddingTokens)
+	}
+}
+
+func TestRepresentationsRejectsDimensionChangesAcrossBatches(t *testing.T) {
+	t.Parallel()
+	embedder := &scriptedEmbedder{results: []scriptedEmbeddingResult{
+		{result: rag.EmbeddingResult{Vectors: [][]float32{{1, 0}}}},
+		{result: rag.EmbeddingResult{Vectors: [][]float32{{1, 0, 0}}}},
+	}}
+	reps := []rag.Representation{{ID: "1", Text: "oak"}, {ID: "2", Text: "pine"}}
+	_, _, err := Representations(context.Background(), embedder, "model", reps, 1)
+	if err == nil || !strings.Contains(err.Error(), "got 3, want 2") {
+		t.Fatalf("Representations() error = %v, want cross-batch dimensions error", err)
+	}
+}
+
+type scriptedEmbeddingResult struct {
+	result rag.EmbeddingResult
+	err    error
+}
+
+type scriptedEmbedder struct {
+	results []scriptedEmbeddingResult
+	calls   int
+}
+
+func (embedder *scriptedEmbedder) Embed(_ context.Context, _ rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
+	result := embedder.results[embedder.calls]
+	embedder.calls++
+	return result.result, result.err
 }
 
 type missingUsageEmbedder struct{}

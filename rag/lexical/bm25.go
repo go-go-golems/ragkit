@@ -41,7 +41,9 @@ func Build(representations []rag.Representation, chunks []rag.Chunk, config Conf
 	if config.B == nil {
 		config.B = float64Pointer(0.75)
 	}
-	if config.K1 <= 0 || *config.B < 0 || *config.B > 1 {
+	if math.IsNaN(config.K1) || math.IsInf(config.K1, 0) ||
+		math.IsNaN(*config.B) || math.IsInf(*config.B, 0) ||
+		config.K1 <= 0 || *config.B < 0 || *config.B > 1 {
 		return nil, fmt.Errorf("invalid BM25 parameters")
 	}
 	if config.Channel == "" {

@@ -1,6 +1,10 @@
 package rag
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/go-go-golems/ragkit/digest"
+)
 
 func TestValidateChunk(t *testing.T) {
 	t.Parallel()
@@ -8,14 +12,14 @@ func TestValidateChunk(t *testing.T) {
 	document := Document{
 		ID:            "doc-1",
 		Text:          "hello 🌳 world",
-		ContentDigest: "sha256:document",
+		ContentDigest: digest.Text("hello 🌳 world"),
 	}
 	chunk := Chunk{
 		ID:            "chunk-1",
 		DocumentID:    document.ID,
 		Range:         Range{ByteStart: 6, ByteEnd: 10},
 		Text:          "🌳",
-		ContentDigest: "sha256:chunk",
+		ContentDigest: digest.Text("🌳"),
 		Chunker:       "fixed",
 	}
 
@@ -27,13 +31,13 @@ func TestValidateChunk(t *testing.T) {
 func TestValidateChunkRejectsMismatchedSourceSlice(t *testing.T) {
 	t.Parallel()
 
-	document := Document{ID: "doc-1", Text: "source", ContentDigest: "sha256:document"}
+	document := Document{ID: "doc-1", Text: "source", ContentDigest: digest.Text("source")}
 	chunk := Chunk{
 		ID:            "chunk-1",
 		DocumentID:    document.ID,
 		Range:         Range{ByteStart: 0, ByteEnd: 6},
 		Text:          "target",
-		ContentDigest: "sha256:chunk",
+		ContentDigest: digest.Text("target"),
 		Chunker:       "fixed",
 	}
 

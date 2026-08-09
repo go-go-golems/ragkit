@@ -113,3 +113,16 @@ func TestExtractiveSummarizerCapsLongText(t *testing.T) {
 		t.Fatalf("summary length = %d runes, want <= 41", len([]rune(summary)))
 	}
 }
+
+func TestExtractiveSummarizerRecognizesQuestionAndExclamationEndings(t *testing.T) {
+	t.Parallel()
+	for _, want := range []string{"Ready?", "Stop!"} {
+		summary, err := (ExtractiveSummarizer{}).Summarize(context.Background(), chunk("chunk", want+" Later sentence."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary != want {
+			t.Fatalf("summary = %q, want %q", summary, want)
+		}
+	}
+}

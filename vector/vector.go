@@ -65,9 +65,9 @@ func Normalize(values []float32) error {
 	if squaredNorm == 0 {
 		return nil
 	}
-	norm := float32(math.Sqrt(squaredNorm))
+	norm := math.Sqrt(squaredNorm)
 	for index := range values {
-		values[index] /= norm
+		values[index] = float32(float64(values[index]) / norm)
 	}
 	return nil
 }
