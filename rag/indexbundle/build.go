@@ -161,6 +161,9 @@ func validateBuildInput(input BuildInput) error {
 	if err := rag.ValidateCorpus(input.Documents, input.Chunks); err != nil {
 		return errors.Wrap(err, "validate bundle corpus")
 	}
+	if err := rag.ValidateRepresentations(input.Chunks, input.Representations); err != nil {
+		return errors.Wrap(err, "validate bundle representations")
+	}
 	if strings.TrimSpace(input.Chunker.Name) == "" || input.Chunker.MaximumRunes <= 0 ||
 		input.Chunker.OverlapRunes < 0 || input.Chunker.OverlapRunes >= input.Chunker.MaximumRunes {
 		return errors.New("valid bundle chunker identity is required")

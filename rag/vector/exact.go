@@ -66,13 +66,18 @@ func NewExact(
 			return nil, fmt.Errorf("vector %q: %w", vector.RepresentationID, err)
 		}
 	}
+	ownedVectors := make([]rag.Vector, len(vectors))
+	for index, vector := range vectors {
+		ownedVectors[index] = vector
+		ownedVectors[index].Values = append([]float32(nil), vector.Values...)
+	}
 	return &Exact{
 		model:           model,
 		channel:         channel,
 		queryEmbedder:   queryEmbedder,
 		representations: representationByID,
 		chunks:          chunkByID,
-		vectors:         append([]rag.Vector(nil), vectors...),
+		vectors:         ownedVectors,
 	}, nil
 }
 

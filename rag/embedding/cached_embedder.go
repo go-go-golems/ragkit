@@ -2,11 +2,13 @@ package embedding
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/go-go-golems/ragkit/execution"
 	"github.com/go-go-golems/ragkit/rag"
+	vectorutil "github.com/go-go-golems/ragkit/vector"
 	"github.com/pkg/errors"
 )
 
@@ -78,6 +80,8 @@ func (e *CachedEmbedder) Embed(ctx context.Context, request rag.EmbeddingRequest
 		items[index] = item{Model: request.Model, Text: text}
 	}
 	var usage rag.UsageAccumulator
+	var dimensionsMutex sync.Mutex
+	dimensions := 0
 	vectors, report, err := execution.MapCached(ctx, items, execution.CachedMapOptions[item]{
 		Map:   execution.MapOptions[item]{Workers: e.options.Workers, Limiter: e.options.Limiter},
 		Cache: e.options.Cache,
@@ -89,11 +93,29 @@ func (e *CachedEmbedder) Embed(ctx context.Context, request rag.EmbeddingRequest
 		if err != nil {
 			return nil, err
 		}
+		// Provider work has already been billed even when its output later
+		// fails shape or finite-value validation.
+		usage.Add(result.Usage)
 		if len(result.Vectors) != 1 {
 			return nil, errors.Errorf("embedder returned %d vectors for one text", len(result.Vectors))
 		}
-		usage.Add(result.Usage)
-		return result.Vectors[0], nil
+		vector := result.Vectors[0]
+		if len(vector) == 0 {
+			return nil, errors.New("embedder returned an empty vector")
+		}
+		if err := vectorutil.ValidateFinite(vector); err != nil {
+			return nil, errors.Wrap(err, "validate embedder vector")
+		}
+		dimensionsMutex.Lock()
+		if dimensions == 0 {
+			dimensions = len(vector)
+		}
+		wantDimensions := dimensions
+		dimensionsMutex.Unlock()
+		if len(vector) != wantDimensions {
+			return nil, errors.Errorf("embedder changed vector dimensions within one request: got %d, want %d", len(vector), wantDimensions)
+		}
+		return vector, nil
 	})
 	e.hits.Add(int64(report.Hits))
 	e.misses.Add(int64(report.Misses))
@@ -107,6 +129,17 @@ func (e *CachedEmbedder) Embed(ctx context.Context, request rag.EmbeddingRequest
 	}
 	if err != nil {
 		return rag.EmbeddingResult{}, err
+	}
+	for index, vector := range vectors {
+		if len(vector) == 0 {
+			return rag.EmbeddingResult{}, fmt.Errorf("cached embedding vector %d is empty", index)
+		}
+		if index > 0 && len(vector) != len(vectors[0]) {
+			return rag.EmbeddingResult{}, fmt.Errorf("embedding vector %d has %d dimensions, want %d", index, len(vector), len(vectors[0]))
+		}
+		if err := vectorutil.ValidateFinite(vector); err != nil {
+			return rag.EmbeddingResult{}, errors.Wrapf(err, "validate embedding vector %d", index)
+		}
 	}
 	return rag.EmbeddingResult{Vectors: vectors, Usage: usage.Snapshot()}, nil
 }

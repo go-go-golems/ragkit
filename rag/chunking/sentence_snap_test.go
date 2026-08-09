@@ -42,6 +42,19 @@ func TestSentenceSnapWithoutBoundaryKeepsTheWindow(t *testing.T) {
 	}
 }
 
+func TestSentenceSnapIncludesTheExactLookbackBoundary(t *testing.T) {
+	text := strings.Repeat("a", 49) + "." + strings.Repeat("b", 100)
+	byteOffsets := make([]int, 0, len(text)+1)
+	for offset := range text {
+		byteOffsets = append(byteOffsets, offset)
+	}
+	byteOffsets = append(byteOffsets, len(text))
+	got := snapToSentence(text, byteOffsets, 0, 100, 10, 50)
+	if got != 50 {
+		t.Fatalf("snap boundary = %d, want 50", got)
+	}
+}
+
 func TestSentenceSnapChangesTheChunkerName(t *testing.T) {
 	plain := &Markdown{MaxSectionRunes: 1200, OverlapRunes: 120}
 	snapped := &Markdown{MaxSectionRunes: 1200, OverlapRunes: 120, SentenceSnapRunes: 200}

@@ -65,6 +65,14 @@ func TestParseBatchedResponseToleratesFencesAndProse(t *testing.T) {
 	}
 }
 
+func TestParseBatchedResponseSkipsEarlierProseBrackets(t *testing.T) {
+	response := `Here is [the result]: [{"chunk":1,"text":"first"},{"chunk":2,"text":"second"}]`
+	texts := parseBatchedResponse(response, 2)
+	if texts[1] != "first" || texts[2] != "second" {
+		t.Fatalf("texts = %v", texts)
+	}
+}
+
 func TestParseBatchedResponseDropsOutOfRangeAndDuplicates(t *testing.T) {
 	response := `[{"chunk": 0, "text": "x"}, {"chunk": 1, "text": "a"}, {"chunk": 1, "text": "b"}, {"chunk": 9, "text": "y"}, {"chunk": 2, "text": ""}]`
 	texts := parseBatchedResponse(response, 2)

@@ -39,6 +39,23 @@ func TestRRFRejectsNonFiniteConstantsBeforeSearch(t *testing.T) {
 	}
 }
 
+func TestRRFRejectsInvalidWeightsBeforeSearch(t *testing.T) {
+	for name, weight := range map[string]float64{
+		"nan": math.NaN(), "positive infinity": math.Inf(1), "negative infinity": math.Inf(-1), "negative": -1, "zero": 0,
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, lexical, vector := serviceFixture()
+			service.Generator = &fixedGenerator{}
+			request := requestFixture(StrategyMultiQuery)
+			request.Config.RRFWeights = map[string]float64{"bm25": weight}
+			_, err := service.Retrieve(t.Context(), request)
+			require.ErrorContains(t, err, "RRF weight")
+			require.Zero(t, lexical.calls)
+			require.Zero(t, vector.calls)
+		})
+	}
+}
+
 type reversingReranker struct{ candidates int }
 
 func (r *reversingReranker) Rerank(_ context.Context, request rag.RerankRequest) (rag.RerankResult, error) {

@@ -69,9 +69,12 @@ type RetrievalResult struct {
 	Variants []string `json:"variants,omitempty"`
 	// VariantError states why query generation fell back to the plain
 	// question. The turn still answers; the record says what degraded.
-	VariantError string         `json:"variant_error,omitempty"`
-	Fused        []rag.FusedHit `json:"fused,omitempty"`
-	Evidence     []rag.Evidence `json:"evidence,omitempty"`
+	VariantError string `json:"variant_error,omitempty"`
+	// QueryGenerationUsage retains provider usage from multi-query and HyDE
+	// transformations, including calls whose output falls back after parsing.
+	QueryGenerationUsage rag.Usage      `json:"query_generation_usage"`
+	Fused                []rag.FusedHit `json:"fused,omitempty"`
+	Evidence             []rag.Evidence `json:"evidence,omitempty"`
 	// AugmentationTrace is an opaque, durable trace supplied by an optional
 	// retrieval augmenter. Raw JSON keeps answering independent of the concrete
 	// connected-retrieval package while preserving the trace in session records.

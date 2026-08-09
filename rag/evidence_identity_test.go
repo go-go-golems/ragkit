@@ -10,12 +10,12 @@ import (
 func TestEvidenceIdentitiesTrackOrderedSourceContentButIgnoreScores(t *testing.T) {
 	evidence := []Evidence{
 		{
-			Chunk:          Chunk{ID: "c1", Text: "first", ContentDigest: "digest-1"},
+			Chunk:          Chunk{ID: "c1", Text: "first", ContentDigest: digest.Text("first")},
 			Rank:           1,
 			RetrievalScore: 1.996638799554313,
 		},
 		{
-			Chunk:          Chunk{ID: "c2", Text: "second", ContentDigest: "digest-2"},
+			Chunk:          Chunk{ID: "c2", Text: "second", ContentDigest: digest.Text("second")},
 			Rank:           2,
 			RetrievalScore: 1.25,
 		},
@@ -36,10 +36,10 @@ func TestEvidenceIdentitiesTrackOrderedSourceContentButIgnoreScores(t *testing.T
 	require.NoError(t, err)
 	require.NotEqual(t, first, reordered)
 
-	evidence[0].Chunk.ContentDigest = "changed"
+	evidence[0].Chunk.Text = "changed"
 	contentChanged, err := EvidenceIdentities(evidence)
-	require.NoError(t, err)
-	require.NotEqual(t, reordered, contentChanged)
+	require.ErrorContains(t, err, "content digest mismatch")
+	require.Nil(t, contentChanged)
 }
 
 func TestEvidenceIdentitiesDeriveMissingContentDigest(t *testing.T) {
@@ -49,4 +49,12 @@ func TestEvidenceIdentitiesDeriveMissingContentDigest(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, identities, 1)
 	require.Equal(t, digest.Text("source text"), identities[0].ContentDigest)
+}
+
+func TestEvidenceIdentitiesRejectStaleSuppliedDigest(t *testing.T) {
+	identities, err := EvidenceIdentities([]Evidence{{
+		Chunk: Chunk{ID: "c1", Text: "current source text", ContentDigest: digest.Text("old source text")},
+	}})
+	require.ErrorContains(t, err, "content digest mismatch")
+	require.Nil(t, identities)
 }

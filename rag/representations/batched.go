@@ -122,25 +122,30 @@ type generatedText struct {
 // text are dropped; the caller repairs whatever is missing.
 func parseBatchedResponse(response string, groupLen int) map[int]string {
 	trimmed := strings.TrimSpace(response)
-	start := strings.Index(trimmed, "[")
-	end := strings.LastIndex(trimmed, "]")
 	texts := map[int]string{}
-	if start < 0 || end <= start {
-		return texts
-	}
-	var entries []batchedEntry
-	if err := json.Unmarshal([]byte(trimmed[start:end+1]), &entries); err != nil {
-		return texts
-	}
-	for _, entry := range entries {
-		text := strings.TrimSpace(entry.Text)
-		if entry.Chunk < 1 || entry.Chunk > groupLen || text == "" {
-			continue
+	for start := strings.IndexByte(trimmed, '['); start >= 0; {
+		var entries []batchedEntry
+		decoder := json.NewDecoder(strings.NewReader(trimmed[start:]))
+		if err := decoder.Decode(&entries); err == nil {
+			for _, entry := range entries {
+				text := strings.TrimSpace(entry.Text)
+				if entry.Chunk < 1 || entry.Chunk > groupLen || text == "" {
+					continue
+				}
+				if _, seen := texts[entry.Chunk]; seen {
+					continue
+				}
+				texts[entry.Chunk] = text
+			}
+			if len(texts) > 0 {
+				return texts
+			}
 		}
-		if _, seen := texts[entry.Chunk]; seen {
-			continue
+		next := strings.IndexByte(trimmed[start+1:], '[')
+		if next < 0 {
+			break
 		}
-		texts[entry.Chunk] = text
+		start += next + 1
 	}
 	return texts
 }

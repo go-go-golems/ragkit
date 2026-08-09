@@ -208,6 +208,13 @@ func TestBuildRejectsInvalidCorpusBeforeCreatingBackends(t *testing.T) {
 				input.Chunks[0].ContentDigest = digest.Text("different")
 			},
 		},
+		{
+			name: "raw representation mismatch", want: "raw representation",
+			mutate: func(input *BuildInput) {
+				input.Representations[0].Text = "different raw text"
+				input.Representations[0].ContentDigest = digest.Text(input.Representations[0].Text)
+			},
+		},
 	}
 
 	for _, test := range tests {

@@ -3,6 +3,7 @@ package answering
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -137,4 +138,59 @@ func TestQueryGenerationObserverFailureStopsRetrieval(t *testing.T) {
 			require.Empty(t, vector.queries)
 		})
 	}
+}
+
+func TestQueryGenerationFallbackObserverFailureStopsRetrieval(t *testing.T) {
+	for _, strategy := range []Strategy{StrategyMultiQuery, StrategyHyDE} {
+		t.Run(string(strategy), func(t *testing.T) {
+			generated := "not json"
+			if strategy == StrategyHyDE {
+				generated = ""
+			}
+			service, lexical, vector := querygenFixture(generated, nil)
+			service.Observer = func(_ context.Context, observation Observation) error {
+				if observation.Stage == StageQueryGen && observation.Status == ObservationFailed {
+					return errors.New("failure observation unavailable")
+				}
+				return nil
+			}
+			_, err := service.Retrieve(t.Context(), requestFixture(strategy))
+			require.ErrorContains(t, err, "failure observation unavailable")
+			require.Empty(t, lexical.queries)
+			require.Empty(t, vector.queries)
+		})
+	}
+}
+
+func TestQueryGenerationUsageSurvivesSuccessAndFallback(t *testing.T) {
+	for name, generated := range map[string]string{
+		"success":  `{"variants":["one","two","three"]}`,
+		"fallback": "not json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, _, _ := querygenFixture(generated, nil)
+			tokens := int64(17)
+			service.Generator.(*fixedGenerator).result.Usage = rag.Usage{InputTokens: &tokens}
+			result, err := service.Retrieve(t.Context(), requestFixture(StrategyMultiQuery))
+			require.NoError(t, err)
+			require.NotNil(t, result.QueryGenerationUsage.InputTokens)
+			require.Equal(t, tokens, *result.QueryGenerationUsage.InputTokens)
+		})
+	}
+}
+
+func TestDefaultQueryTransformationPromptsAreDomainNeutral(t *testing.T) {
+	service, _, _ := querygenFixture(`{"variants":["one","two","three"]}`, nil)
+	_, err := service.Retrieve(t.Context(), requestFixture(StrategyMultiQuery))
+	require.NoError(t, err)
+	prompt := service.Generator.(*fixedGenerator).request.Prompt
+	require.NotContains(t, strings.ToLower(prompt), "plant")
+	require.Contains(t, prompt, "domain-specific entities")
+
+	service, _, _ = querygenFixture("hypothetical", nil)
+	_, err = service.Retrieve(t.Context(), requestFixture(StrategyHyDE))
+	require.NoError(t, err)
+	prompt = service.Generator.(*fixedGenerator).request.Prompt
+	require.NotContains(t, strings.ToLower(prompt), "plant")
+	require.Contains(t, prompt, "domain of the question")
 }

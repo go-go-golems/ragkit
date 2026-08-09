@@ -1,6 +1,7 @@
 package evaluation
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -19,6 +20,19 @@ func TestRetrievalMetrics(t *testing.T) {
 	}
 	if metrics.MRR != 0.5 || metrics.RecallAt[1] != 0 || metrics.RecallAt[2] != 1 {
 		t.Fatalf("metrics = %+v", metrics)
+	}
+}
+
+func TestRetrievalRejectsInvalidRelevanceGrades(t *testing.T) {
+	for _, grade := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		_, err := Retrieval(
+			rag.Query{ID: "q"}, []string{"target"},
+			[]rag.Judgment{{QueryID: "q", Target: "document", TargetID: "target", Grade: grade}},
+			[]int{1},
+		)
+		if err == nil {
+			t.Fatalf("Retrieval() accepted invalid grade %v", grade)
+		}
 	}
 }
 

@@ -26,8 +26,11 @@ func EvidenceIdentities(evidence []Evidence) ([]EvidenceIdentity, error) {
 			return nil, errors.Errorf("evidence %d has no chunk ID", index)
 		}
 		contentDigest := item.Chunk.ContentDigest
+		actualDigest := digest.Text(item.Chunk.Text)
 		if contentDigest == "" {
-			contentDigest = digest.Text(item.Chunk.Text)
+			contentDigest = actualDigest
+		} else if contentDigest != actualDigest {
+			return nil, errors.Errorf("evidence %d chunk %q content digest mismatch: stored=%s actual=%s", index, item.Chunk.ID, contentDigest, actualDigest)
 		}
 		ret[index] = EvidenceIdentity{
 			ChunkID:       item.Chunk.ID,

@@ -87,6 +87,46 @@ func ValidateCorpus(documents []Document, chunks []Chunk) error {
 	return nil
 }
 
+// ValidateRepresentations checks searchable-text identity and lineage against
+// the source chunks. Raw representations must be exact source evidence;
+// generated representations carry their own text digest.
+func ValidateRepresentations(chunks []Chunk, representations []Representation) error {
+	chunkByID := make(map[string]Chunk, len(chunks))
+	for _, chunk := range chunks {
+		chunkByID[chunk.ID] = chunk
+	}
+	seen := make(map[string]struct{}, len(representations))
+	for index, representation := range representations {
+		if strings.TrimSpace(representation.ID) == "" {
+			return fmt.Errorf("representation %d has no ID", index)
+		}
+		if _, exists := seen[representation.ID]; exists {
+			return fmt.Errorf("duplicate representation ID %q", representation.ID)
+		}
+		seen[representation.ID] = struct{}{}
+		chunk, exists := chunkByID[representation.ChunkID]
+		if !exists {
+			return fmt.Errorf("representation %q references unknown chunk %q", representation.ID, representation.ChunkID)
+		}
+		if strings.TrimSpace(representation.Kind) == "" {
+			return fmt.Errorf("representation %q has no kind", representation.ID)
+		}
+		if !utf8.ValidString(representation.Text) {
+			return fmt.Errorf("representation %q contains invalid UTF-8", representation.ID)
+		}
+		if representation.ContentDigest == "" {
+			return fmt.Errorf("representation %q content digest is required", representation.ID)
+		}
+		if actual := digest.Text(representation.Text); actual != representation.ContentDigest {
+			return fmt.Errorf("representation %q content digest mismatch: stored=%s actual=%s", representation.ID, representation.ContentDigest, actual)
+		}
+		if representation.Kind == "raw" && (representation.Text != chunk.Text || representation.ContentDigest != chunk.ContentDigest) {
+			return fmt.Errorf("raw representation %q differs from chunk %q", representation.ID, chunk.ID)
+		}
+	}
+	return nil
+}
+
 // ValidateQueries requires stable, unique query identities before evaluation
 // or aggregation can assign weights to them.
 func ValidateQueries(queries []Query) error {

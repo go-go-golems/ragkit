@@ -3,7 +3,6 @@ package representations
 import (
 	"context"
 	"strings"
-	"unicode"
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
@@ -219,8 +218,11 @@ func HeadingPath(document rag.Document, chunk rag.Chunk) string {
 	if title := strings.TrimSpace(document.Title); title != "" {
 		path = append(path, title)
 	}
-	for level := 2; level <= 6; level++ {
+	for level := 1; level <= 6; level++ {
 		if levels[level] != "" {
+			if level == 1 && len(path) > 0 && path[len(path)-1] == levels[level] {
+				continue
+			}
 			path = append(path, levels[level])
 		}
 	}
@@ -238,14 +240,24 @@ func ParseQuestionLines(text string) []string {
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		line = strings.TrimLeft(line, "-*• \t")
-		line = strings.TrimLeftFunc(line, unicode.IsDigit)
-		line = strings.TrimLeft(line, ".) \t")
+		line = stripOrderedListPrefix(line)
 		if line == "" || strings.HasPrefix(line, "```") {
 			continue
 		}
 		questions = append(questions, line)
 	}
 	return questions
+}
+
+func stripOrderedListPrefix(line string) string {
+	index := 0
+	for index < len(line) && line[index] >= '0' && line[index] <= '9' {
+		index++
+	}
+	if index == 0 || index == len(line) || (line[index] != '.' && line[index] != ')') {
+		return line
+	}
+	return strings.TrimLeft(line[index+1:], " \t")
 }
 
 // generatePerChunk sends one request per chunk and returns the raw response

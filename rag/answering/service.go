@@ -41,14 +41,14 @@ type Service struct {
 // DefaultMultiQueryPrompt is the fmt format string for the multi-query
 // rewrite; both verbs receive the variant count.
 const DefaultMultiQueryPrompt = "Rewrite the user's question as %d alternative" +
-	" search queries that a plant-care customer might type. Keep species" +
-	" names. Return exactly one JSON object: {\"variants\": [\"...\"]} with" +
+	" search queries that preserve the question's domain-specific entities" +
+	" and intent. Return exactly one JSON object: {\"variants\": [\"...\"]} with" +
 	" %d strings and nothing else."
 
 // DefaultHyDEPrompt asks for the hypothetical answer HyDE embeds in place of
 // the raw question on the vector channel.
 const DefaultHyDEPrompt = "Write a short plausible answer to the question," +
-	" two to four sentences, as it would appear in a plant-care guide." +
+	" two to four sentences, using the terminology and domain of the question." +
 	" Plain text only."
 
 // ValidateRequest rejects ambiguous or impossible work before any component is
@@ -113,6 +113,11 @@ func (s *Service) ValidateRequest(request Request) error {
 	case StrategyRRF, StrategyRRFReranked, StrategyMultiQuery, StrategyHyDE:
 		if math.IsNaN(request.Config.RRFConstant) || math.IsInf(request.Config.RRFConstant, 0) || request.Config.RRFConstant <= 0 {
 			return errors.New("RRF constant must be finite and greater than zero")
+		}
+		for channel, weight := range request.Config.RRFWeights {
+			if math.IsNaN(weight) || math.IsInf(weight, 0) || weight <= 0 {
+				return errors.Errorf("RRF weight for channel %q must be finite and greater than zero", channel)
+			}
 		}
 	case StrategyBM25, StrategyVector:
 	}
@@ -248,11 +253,11 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 			return RetrievalResult{}, err
 		}
 	case StrategyMultiQuery:
-		variants, variantErr, err := s.generateVariants(ctx, state, query, variantCount(request.Config))
+		variants, variantErr, usage, err := s.generateVariants(ctx, state, query, variantCount(request.Config))
 		if err != nil {
 			return RetrievalResult{}, err
 		}
-		result.Variants, result.VariantError = variants, variantErr
+		result.Variants, result.VariantError, result.QueryGenerationUsage = variants, variantErr, usage
 		// The fallback rule: reformulation failure degrades to the plain
 		// question, never to a failed turn. The record says what degraded.
 		queries := append([]rag.Query{query}, variantQueries(query, variants)...)
@@ -275,11 +280,11 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 		}
 		result.Fused = fused
 	case StrategyHyDE:
-		hypothetical, variantErr, err := s.generateHypothetical(ctx, state, query)
+		hypothetical, variantErr, usage, err := s.generateHypothetical(ctx, state, query)
 		if err != nil {
 			return RetrievalResult{}, err
 		}
-		result.VariantError = variantErr
+		result.VariantError, result.QueryGenerationUsage = variantErr, usage
 		vectorQuery := query
 		if hypothetical != "" {
 			result.Variants = []string{hypothetical}
@@ -539,10 +544,10 @@ func (s *Service) generateVariants(
 	state *observationState,
 	query rag.Query,
 	count int,
-) ([]string, string, error) {
+) ([]string, string, rag.Usage, error) {
 	started := time.Now()
 	if err := state.emit(ctx, StageQueryGen, ObservationStarted, started, 0, nil, ""); err != nil {
-		return nil, "", err
+		return nil, "", rag.Usage{}, err
 	}
 	format := s.MultiQueryPrompt
 	if format == "" {
@@ -555,16 +560,20 @@ func (s *Service) generateVariants(
 	})
 	if err != nil {
 		message := err.Error()
-		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return nil, message, nil
+		if observeErr := state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message); observeErr != nil {
+			return nil, message, raw.Usage, observeErr
+		}
+		return nil, message, raw.Usage, nil
 	}
 	var parsed struct {
 		Variants []string `json:"variants"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw.Text)), &parsed); err != nil {
 		message := "decode variants: " + err.Error()
-		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return nil, message, nil
+		if observeErr := state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), raw, message); observeErr != nil {
+			return nil, message, raw.Usage, observeErr
+		}
+		return nil, message, raw.Usage, nil
 	}
 	variants := make([]string, 0, count)
 	seen := map[string]bool{query.Text: true}
@@ -581,13 +590,15 @@ func (s *Service) generateVariants(
 	}
 	if len(variants) != count {
 		message := fmt.Sprintf("the generator returned %d distinct usable variants; expected %d", len(variants), count)
-		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return nil, message, nil
+		if observeErr := state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), raw, message); observeErr != nil {
+			return nil, message, raw.Usage, observeErr
+		}
+		return nil, message, raw.Usage, nil
 	}
 	if err := state.emit(ctx, StageQueryGen, ObservationCompleted, started, time.Since(started), variants, ""); err != nil {
-		return nil, "", err
+		return nil, "", raw.Usage, err
 	}
-	return variants, "", nil
+	return variants, "", raw.Usage, nil
 }
 
 // validateRerankedEvidence treats provider output as an ordering and score
@@ -627,10 +638,10 @@ func (s *Service) generateHypothetical(
 	ctx context.Context,
 	state *observationState,
 	query rag.Query,
-) (string, string, error) {
+) (string, string, rag.Usage, error) {
 	started := time.Now()
 	if err := state.emit(ctx, StageQueryGen, ObservationStarted, started, 0, nil, ""); err != nil {
-		return "", "", err
+		return "", "", rag.Usage{}, err
 	}
 	hydePrompt := s.HyDEPrompt
 	if hydePrompt == "" {
@@ -643,19 +654,23 @@ func (s *Service) generateHypothetical(
 	})
 	if err != nil {
 		message := err.Error()
-		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return "", message, nil
+		if observeErr := state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message); observeErr != nil {
+			return "", message, raw.Usage, observeErr
+		}
+		return "", message, raw.Usage, nil
 	}
 	hypothetical := strings.TrimSpace(raw.Text)
 	if hypothetical == "" {
 		message := "the generator returned an empty hypothetical answer"
-		_ = state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), nil, message)
-		return "", message, nil
+		if observeErr := state.emit(context.WithoutCancel(ctx), StageQueryGen, ObservationFailed, started, time.Since(started), raw, message); observeErr != nil {
+			return "", message, raw.Usage, observeErr
+		}
+		return "", message, raw.Usage, nil
 	}
 	if err := state.emit(ctx, StageQueryGen, ObservationCompleted, started, time.Since(started), hypothetical, ""); err != nil {
-		return "", "", err
+		return "", "", raw.Usage, err
 	}
-	return hypothetical, "", nil
+	return hypothetical, "", raw.Usage, nil
 }
 
 func (s *Service) contractKind() string {

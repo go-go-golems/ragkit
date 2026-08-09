@@ -3,6 +3,7 @@ package bleve
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,6 +46,24 @@ func TestBuildSearchReopen(t *testing.T) {
 	}
 	if len(reopenedHits) != len(hits) || reopenedHits[0].RepresentationID != hits[0].RepresentationID {
 		t.Fatalf("reopen mismatch: %#v != %#v", reopenedHits, hits)
+	}
+}
+
+func TestBuildRejectsInvalidBoostsBeforeCreatingOutput(t *testing.T) {
+	documents, chunks, representations := fixture()
+	for name, boost := range map[string]float64{
+		"nan": math.NaN(), "positive-infinity": math.Inf(1), "negative-infinity": math.Inf(-1), "negative": -1,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "invalid.bleve")
+			_, _, err := Build(t.Context(), Config{Path: path, TitleBoost: boost}, documents, chunks, representations)
+			if err == nil {
+				t.Fatal("Build() error = nil")
+			}
+			if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+				t.Fatalf("output exists after validation failure: %v", statErr)
+			}
+		})
 	}
 }
 
