@@ -67,6 +67,14 @@ func TestHeadingPathIncludesHeadingAtChunkStart(t *testing.T) {
 	}
 }
 
+func TestHeadingPathIgnoresFencedHeadingLikeLines(t *testing.T) {
+	text := "# Real\n\n```markdown\n## Not structural\n```\n\n### Actual\n\nbody"
+	chunk := rag.Chunk{Range: rag.Range{ByteStart: strings.Index(text, "body")}}
+	if path := HeadingPath(rag.Document{Text: text}, chunk); path != "Real > Actual" {
+		t.Fatalf("heading path = %q, want %q", path, "Real > Actual")
+	}
+}
+
 func TestParseQuestionLinesPreservesLeadingDigitsOutsideListMarkers(t *testing.T) {
 	questions := ParseQuestionLines("2024 planting guidance\n1. First question\n2) Second question")
 	want := []string{"2024 planting guidance", "First question", "Second question"}

@@ -11,6 +11,7 @@ import (
 type identity struct {
 	SchemaVersion        int             `json:"schema_version"`
 	CorpusDigest         string          `json:"corpus_digest"`
+	ChunkDigest          string          `json:"chunk_digest"`
 	Chunker              ChunkerIdentity `json:"chunker"`
 	RepresentationKinds  []string        `json:"representation_kinds"`
 	RepresentationDigest string          `json:"representation_digest"`
@@ -20,18 +21,23 @@ type identity struct {
 
 func CalculateID(
 	documents []rag.Document,
+	chunks []rag.Chunk,
 	representations []rag.Representation,
 	chunker ChunkerIdentity,
 	lexical BackendIdentity,
 	vector *VectorIdentity,
-) (string, string, string, []string, error) {
+) (string, string, string, string, []string, error) {
 	corpusDigest, err := digest.JSON(documents)
 	if err != nil {
-		return "", "", "", nil, errors.Wrap(err, "digest bundle corpus")
+		return "", "", "", "", nil, errors.Wrap(err, "digest bundle corpus")
+	}
+	chunkDigest, err := digest.JSON(chunks)
+	if err != nil {
+		return "", "", "", "", nil, errors.Wrap(err, "digest bundle chunks")
 	}
 	representationDigest, err := digest.JSON(representations)
 	if err != nil {
-		return "", "", "", nil, errors.Wrap(err, "digest bundle representations")
+		return "", "", "", "", nil, errors.Wrap(err, "digest bundle representations")
 	}
 	kinds := representationKinds(representations)
 	vectorIdentity := cloneVectorIdentity(vector)
@@ -39,16 +45,17 @@ func CalculateID(
 		vectorIdentity.RepresentationDigest = representationDigest
 	}
 	id, err := calculateIDFromDigests(
-		corpusDigest, representationDigest, kinds, chunker, lexical, vectorIdentity,
+		corpusDigest, chunkDigest, representationDigest, kinds, chunker, lexical, vectorIdentity,
 	)
 	if err != nil {
-		return "", "", "", nil, err
+		return "", "", "", "", nil, err
 	}
-	return id, corpusDigest, representationDigest, kinds, nil
+	return id, corpusDigest, chunkDigest, representationDigest, kinds, nil
 }
 
 func calculateIDFromDigests(
 	corpusDigest string,
+	chunkDigest string,
 	representationDigest string,
 	kinds []string,
 	chunker ChunkerIdentity,
@@ -58,6 +65,7 @@ func calculateIDFromDigests(
 	id, err := digest.TruncatedJSON("rk-", 16, identity{
 		SchemaVersion:        SchemaVersion,
 		CorpusDigest:         corpusDigest,
+		ChunkDigest:          chunkDigest,
 		Chunker:              chunker,
 		RepresentationKinds:  kinds,
 		RepresentationDigest: representationDigest,

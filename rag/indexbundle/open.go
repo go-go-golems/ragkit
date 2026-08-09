@@ -97,19 +97,23 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 }
 
 func validateStoredIdentity(manifest Manifest, data bundleData) error {
+	chunkDigest, err := digest.JSON(data.chunks)
+	if err != nil {
+		return err
+	}
 	representationDigest, err := digest.JSON(data.representations)
 	if err != nil {
 		return err
 	}
 	kinds := representationKinds(data.representations)
 	expectedID, err := calculateIDFromDigests(
-		manifest.CorpusDigest, representationDigest, kinds,
+		manifest.CorpusDigest, chunkDigest, representationDigest, kinds,
 		manifest.Chunker, manifest.Lexical, manifest.Vector,
 	)
 	if err != nil {
 		return err
 	}
-	if expectedID != manifest.BundleID || !reflect.DeepEqual(kinds, manifest.RepresentationKinds) {
+	if expectedID != manifest.BundleID || chunkDigest != manifest.ChunkDigest || !reflect.DeepEqual(kinds, manifest.RepresentationKinds) {
 		return errors.New("bundle manifest identity does not match stored data")
 	}
 	if manifest.Vector != nil {

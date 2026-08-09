@@ -79,7 +79,7 @@ func TestObservedGeneratorProviderAndObserverErrors(t *testing.T) {
 		var observed GenerationObservation
 		generator, err := ObservedGenerator(
 			generatorFunc(func(context.Context, rag.GenerationRequest) (rag.GenerationResult, error) {
-				return rag.GenerationResult{}, providerErr
+				return rag.GenerationResult{Usage: rag.Usage{InputTokens: ptr(int64(7))}}, providerErr
 			}),
 			ObservationPolicy{IncludeResponse: true},
 			func(_ context.Context, observation GenerationObservation) error {
@@ -88,8 +88,9 @@ func TestObservedGeneratorProviderAndObserverErrors(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		_, err = generator.Generate(t.Context(), rag.GenerationRequest{Kind: "kind", Model: "model"})
+		result, err := generator.Generate(t.Context(), rag.GenerationRequest{Kind: "kind", Model: "model"})
 		require.ErrorIs(t, err, providerErr)
+		require.Equal(t, int64(7), *result.Usage.InputTokens)
 		require.Equal(t, providerErr.Error(), observed.ProviderError)
 		require.Nil(t, observed.Response)
 	})
@@ -102,10 +103,13 @@ func TestObservedGeneratorProviderAndObserverErrors(t *testing.T) {
 			func(context.Context, GenerationObservation) error { return observerErr },
 		)
 		require.NoError(t, err)
-		_, err = generator.Generate(t.Context(), rag.GenerationRequest{})
+		result, err := generator.Generate(t.Context(), rag.GenerationRequest{})
 		require.ErrorIs(t, err, observerErr)
+		require.Equal(t, "answer", result.Text)
 	})
 }
+
+func ptr[T any](value T) *T { return &value }
 
 func TestObservedGeneratorObservesCancellationWithDetachedContext(t *testing.T) {
 	t.Parallel()

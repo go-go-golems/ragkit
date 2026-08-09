@@ -81,6 +81,9 @@ func WeightedRRF(channels map[string][]rag.Hit, config RRFConfig) ([]rag.FusedHi
 			if hit.ChunkID == "" {
 				return nil, fmt.Errorf("channel %q contains a hit without chunk identity", channel)
 			}
+			if hit.Rank < 1 {
+				return nil, fmt.Errorf("channel %q hit %q has invalid rank %d", channel, hit.ChunkID, hit.Rank)
+			}
 			entry := byChunk[hit.ChunkID]
 			if entry == nil {
 				entry = &rag.FusedHit{ChunkID: hit.ChunkID, DocumentID: hit.DocumentID}

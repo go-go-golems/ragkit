@@ -237,6 +237,14 @@ func runBulk[I, O any](
 			attemptsMade = attempt
 			returned, err := doBulk(ctx, batchItems)
 			count(func(counts *StepReport) { counts.WorkCalls++ })
+			if s.AttemptMeter != nil {
+				for _, value := range returned {
+					metered := s.AttemptMeter(value, err)
+					mutex.Lock()
+					meters.Add(metered)
+					mutex.Unlock()
+				}
+			}
 			if err == nil {
 				if len(returned) != len(batchItems) {
 					return struct{}{}, fmt.Errorf(

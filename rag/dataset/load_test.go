@@ -97,3 +97,33 @@ func TestLoadDocumentsRejectsEmptyCorpus(t *testing.T) {
 	_, err := LoadDocuments(path)
 	require.Error(t, err)
 }
+
+func TestLoadDocumentsRejectsInvalidAndDuplicateDocuments(t *testing.T) {
+	for _, documents := range [][]rag.Document{
+		{{ID: "doc", Text: "body", ContentDigest: "wrong"}},
+		{
+			{ID: "doc", Text: "one", ContentDigest: digest.Text("one")},
+			{ID: "doc", Text: "two", ContentDigest: digest.Text("two")},
+		},
+	} {
+		path := filepath.Join(t.TempDir(), "corpus.json")
+		data, err := json.Marshal(documents)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0o644))
+		_, err = LoadDocuments(path)
+		require.Error(t, err)
+	}
+}
+
+func TestLoadEvaluationRejectsOrphanJudgment(t *testing.T) {
+	set := rag.EvaluationSet{
+		Queries:   []rag.Query{{ID: "known", Text: "question"}},
+		Judgments: []rag.Judgment{{QueryID: "missing", Target: "document", TargetID: "doc", Grade: 1}},
+	}
+	path := filepath.Join(t.TempDir(), "evaluation.json")
+	data, err := json.Marshal(set)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+	_, err = LoadEvaluation(path)
+	require.ErrorContains(t, err, "unknown query")
+}

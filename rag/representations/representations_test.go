@@ -2,7 +2,6 @@ package representations
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/digest"
@@ -110,8 +109,8 @@ func TestExtractiveSummarizerCapsLongText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Summarize error = %v", err)
 	}
-	if len([]rune(summary)) > 41 { // 40 + ellipsis
-		t.Fatalf("summary length = %d runes, want <= 41", len([]rune(summary)))
+	if len([]rune(summary)) > 40 {
+		t.Fatalf("summary length = %d runes, want <= 40", len([]rune(summary)))
 	}
 }
 
@@ -120,8 +119,18 @@ func TestExtractiveSummarizerDoesNotIncludeBoundaryPastMaxRunes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len([]rune(strings.TrimSuffix(summary, "…"))); got != 5 {
-		t.Fatalf("summary content length = %d, want 5: %q", got, summary)
+	if got := len([]rune(summary)); got != 5 {
+		t.Fatalf("summary length = %d, want 5: %q", got, summary)
+	}
+}
+
+func TestExtractiveSummarizerOneRuneCapIncludesOnlyEllipsis(t *testing.T) {
+	summary, err := (ExtractiveSummarizer{MaxRunes: 1}).Summarize(context.Background(), chunk("chunk", "long"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary != "…" {
+		t.Fatalf("summary = %q, want ellipsis", summary)
 	}
 }
 

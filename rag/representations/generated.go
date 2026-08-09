@@ -210,7 +210,20 @@ func HeadingPath(document rag.Document, chunk rag.Chunk) string {
 		}
 	}
 	levels := make([]string, 7)
+	var fence byte
+	var fenceWidth int
 	for _, line := range strings.Split(document.Text[:scanEnd], "\n") {
+		marker, width, closing := headingFence(line, fence, fenceWidth)
+		if fence != 0 {
+			if closing {
+				fence, fenceWidth = 0, 0
+			}
+			continue
+		}
+		if marker != 0 {
+			fence, fenceWidth = marker, width
+			continue
+		}
 		trimmed := strings.TrimSpace(line)
 		level := 0
 		for level < len(trimmed) && trimmed[level] == '#' {
@@ -240,6 +253,31 @@ func HeadingPath(document rag.Document, chunk rag.Chunk) string {
 		return "(document root)"
 	}
 	return strings.Join(path, " > ")
+}
+
+// headingFence recognizes the same CommonMark fence subset used by the
+// chunkers, keeping code samples out of breadcrumb structure.
+func headingFence(line string, open byte, openWidth int) (byte, int, bool) {
+	indent := 0
+	for indent < len(line) && line[indent] == ' ' {
+		indent++
+	}
+	if indent > 3 || indent == len(line) || (line[indent] != '`' && line[indent] != '~') {
+		return 0, 0, false
+	}
+	marker := line[indent]
+	end := indent
+	for end < len(line) && line[end] == marker {
+		end++
+	}
+	width := end - indent
+	if width < 3 {
+		return 0, 0, false
+	}
+	if open == 0 {
+		return marker, width, false
+	}
+	return marker, width, marker == open && width >= openWidth && strings.TrimSpace(line[end:]) == ""
 }
 
 // ParseQuestionLines extracts questions from a generated response: one per

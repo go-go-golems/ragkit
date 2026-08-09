@@ -29,6 +29,9 @@ func LoadDocuments(path string) ([]rag.Document, error) {
 	if len(documents) == 0 {
 		return nil, errors.New("corpus contains no documents")
 	}
+	if err := rag.ValidateCorpus(documents, nil); err != nil {
+		return nil, errors.Wrap(err, "validate corpus")
+	}
 	return documents, nil
 }
 
@@ -43,6 +46,18 @@ func LoadEvaluation(path string) (EvaluationInput, error) {
 	}
 	if len(set.Queries) == 0 {
 		return EvaluationInput{}, errors.New("evaluation data contains no queries")
+	}
+	if err := rag.ValidateQueries(set.Queries); err != nil {
+		return EvaluationInput{}, errors.Wrap(err, "validate evaluation queries")
+	}
+	queryIDs := make(map[string]struct{}, len(set.Queries))
+	for _, query := range set.Queries {
+		queryIDs[query.ID] = struct{}{}
+	}
+	for index, judgment := range set.Judgments {
+		if _, ok := queryIDs[judgment.QueryID]; !ok {
+			return EvaluationInput{}, errors.Errorf("judgment %d refers to unknown query %q", index, judgment.QueryID)
+		}
 	}
 	return EvaluationInput{
 		CorpusDigest: set.CorpusDigest, Queries: set.Queries, Judgments: set.Judgments,

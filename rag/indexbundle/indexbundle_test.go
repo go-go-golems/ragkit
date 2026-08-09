@@ -153,8 +153,8 @@ func TestOpenAllowsAdmittedDocumentWithoutChunks(t *testing.T) {
 
 func TestIdentityChangesForEverySemanticInput(t *testing.T) {
 	base := fixtureInput(t, t.TempDir())
-	id, _, _, _, err := CalculateID(
-		base.Documents, base.Representations, base.Chunker,
+	id, _, _, _, _, err := CalculateID(
+		base.Documents, base.Chunks, base.Representations, base.Chunker,
 		BackendIdentity{Backend: "bleve-bm25", Version: 1, Channel: "bm25", TitleBoost: 2, BodyBoost: 1},
 		base.Embedding,
 	)
@@ -162,8 +162,8 @@ func TestIdentityChangesForEverySemanticInput(t *testing.T) {
 
 	changedChunker := base.Chunker
 	changedChunker.MaximumRunes++
-	other, _, _, _, err := CalculateID(
-		base.Documents, base.Representations, changedChunker,
+	other, _, _, _, _, err := CalculateID(
+		base.Documents, base.Chunks, base.Representations, changedChunker,
 		BackendIdentity{Backend: "bleve-bm25", Version: 1, Channel: "bm25", TitleBoost: 2, BodyBoost: 1},
 		base.Embedding,
 	)
@@ -172,8 +172,8 @@ func TestIdentityChangesForEverySemanticInput(t *testing.T) {
 
 	changedEmbedding := *base.Embedding
 	changedEmbedding.Model = "different"
-	other, _, _, _, err = CalculateID(
-		base.Documents, base.Representations, base.Chunker,
+	other, _, _, _, _, err = CalculateID(
+		base.Documents, base.Chunks, base.Representations, base.Chunker,
 		BackendIdentity{Backend: "bleve-bm25", Version: 1, Channel: "bm25", TitleBoost: 2, BodyBoost: 1},
 		&changedEmbedding,
 	)
@@ -182,8 +182,20 @@ func TestIdentityChangesForEverySemanticInput(t *testing.T) {
 
 	changedRepresentations := append([]rag.Representation(nil), base.Representations...)
 	changedRepresentations[0].Text += " changed"
-	other, _, _, _, err = CalculateID(
-		base.Documents, changedRepresentations, base.Chunker,
+	other, _, _, _, _, err = CalculateID(
+		base.Documents, base.Chunks, changedRepresentations, base.Chunker,
+		BackendIdentity{Backend: "bleve-bm25", Version: 1, Channel: "bm25", TitleBoost: 2, BodyBoost: 1},
+		base.Embedding,
+	)
+	require.NoError(t, err)
+	require.NotEqual(t, id, other)
+
+	changedChunks := append([]rag.Chunk(nil), base.Chunks...)
+	changedChunks[0].Text += " changed"
+	changedChunks[0].ContentDigest = digest.Text(changedChunks[0].Text)
+	changedChunks[0].Range.ByteEnd = changedChunks[0].Range.ByteStart + len(changedChunks[0].Text)
+	other, _, _, _, _, err = CalculateID(
+		base.Documents, changedChunks, base.Representations, base.Chunker,
 		BackendIdentity{Backend: "bleve-bm25", Version: 1, Channel: "bm25", TitleBoost: 2, BodyBoost: 1},
 		base.Embedding,
 	)

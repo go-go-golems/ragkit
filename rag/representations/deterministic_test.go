@@ -61,6 +61,21 @@ func TestSmallToBigPicksTheLargestOverlap(t *testing.T) {
 	}
 }
 
+func TestSmallToBigBreaksEqualOverlapTiesDeterministically(t *testing.T) {
+	first := rag.Chunk{ID: "first", DocumentID: "d", Ordinal: 1, Range: rag.Range{ByteStart: 0, ByteEnd: 20}, Text: "first", ContentDigest: "first"}
+	second := rag.Chunk{ID: "second", DocumentID: "d", Ordinal: 2, Range: rag.Range{ByteStart: 0, ByteEnd: 20}, Text: "second", ContentDigest: "second"}
+	small := rag.Chunk{ID: "small", DocumentID: "d", Range: rag.Range{ByteStart: 5, ByteEnd: 10}, Text: "small", ContentDigest: "small"}
+	for _, parents := range [][]rag.Chunk{{first, second}, {second, first}} {
+		reps, err := SmallToBig([]rag.Chunk{small}, parents)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reps[0].ChunkID != "first" {
+			t.Fatalf("parent = %q, want first", reps[0].ChunkID)
+		}
+	}
+}
+
 func TestSmallToBigFailsWithoutACoveringParent(t *testing.T) {
 	small := rag.Chunk{ID: "s", DocumentID: "d", Range: rag.Range{ByteStart: 0, ByteEnd: 10}, Text: "s", ContentDigest: "s"}
 	if _, err := SmallToBig([]rag.Chunk{small}, nil); err == nil {

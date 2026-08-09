@@ -54,6 +54,15 @@ func TestWeightedRRFRejectsNegativeWeight(t *testing.T) {
 	require.ErrorContains(t, err, "non-negative")
 }
 
+func TestWeightedRRFRejectsInvalidRanks(t *testing.T) {
+	for _, rank := range []int{0, -1} {
+		_, err := WeightedRRF(map[string][]rag.Hit{
+			"lexical": {{ChunkID: "c", Rank: rank}},
+		}, RRFConfig{RankConstant: 60})
+		require.ErrorContains(t, err, "invalid rank")
+	}
+}
+
 func TestWeightedRRFUsesChunkIDAsFinalTieBreaker(t *testing.T) {
 	t.Parallel()
 	fused, err := WeightedRRF(map[string][]rag.Hit{
