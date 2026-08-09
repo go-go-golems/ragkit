@@ -1,0 +1,110 @@
+package generation
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+
+	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/ragkit/rag"
+	"github.com/stretchr/testify/require"
+)
+
+type cachedGeneratorBilledFailure struct{}
+
+func (cachedGeneratorBilledFailure) Generate(context.Context, rag.GenerationRequest) (rag.GenerationResult, error) {
+	tokens := int64(7)
+	return rag.GenerationResult{Text: "partial", Usage: rag.Usage{OutputTokens: &tokens}}, errors.New("billed failure")
+}
+
+func TestCachedGeneratorReturnsKnownUsageWithError(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	decorator, err := NewCachedGenerator(cachedGeneratorBilledFailure{}, CachedProviderOptions{
+		Cache: cache, Workers: 1, AdapterVersion: "adapter-v1", ContextPolicy: ContextPolicyNameForTest,
+	})
+	require.NoError(t, err)
+	result, err := decorator.Generate(t.Context(), rag.GenerationRequest{Kind: "answer", Model: "model"})
+	require.ErrorContains(t, err, "billed failure")
+	require.NotNil(t, result.Usage.OutputTokens)
+	require.EqualValues(t, 7, *result.Usage.OutputTokens)
+}
+
+type cachedGeneratorCountingProvider struct{ calls atomic.Int64 }
+
+func (g *cachedGeneratorCountingProvider) Generate(
+	_ context.Context,
+	_ rag.GenerationRequest,
+) (rag.GenerationResult, error) {
+	g.calls.Add(1)
+	tokens := int64(3)
+	return rag.GenerationResult{
+		Text: "answer", Usage: rag.Usage{OutputTokens: &tokens},
+	}, nil
+}
+
+func TestCachedGeneratorRecoversBeforeZeroBudgetAdmission(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{
+		Directory: t.TempDir(),
+	})
+	require.NoError(t, err)
+	firstBudget, err := execution.NewBudget(1)
+	require.NoError(t, err)
+	provider := &cachedGeneratorCountingProvider{}
+	first, err := NewCachedGenerator(provider, CachedProviderOptions{
+		Cache: cache, Limiter: firstBudget, Workers: 1,
+		AdapterVersion: "adapter-v1",
+		ContextPolicy:  ContextPolicyNameForTest,
+	})
+	require.NoError(t, err)
+	request := rag.GenerationRequest{
+		Kind: "answer", Model: "model", Prompt: "prompt", Text: "question",
+	}
+	_, err = first.Generate(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), provider.calls.Load())
+	require.Equal(t, execution.CacheStored, first.LastOutcome().State)
+
+	zeroBudget, err := execution.NewBudget(0)
+	require.NoError(t, err)
+	second, err := NewCachedGenerator(provider, CachedProviderOptions{
+		Cache: cache, Limiter: zeroBudget, Workers: 1,
+		AdapterVersion: "adapter-v1",
+		ContextPolicy:  ContextPolicyNameForTest,
+	})
+	require.NoError(t, err)
+	result, err := second.Generate(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, "answer", result.Text)
+	require.Equal(t, int64(1), provider.calls.Load())
+	require.Equal(t, execution.CacheHit, second.LastOutcome().State)
+	require.Zero(t, zeroBudget.Spent())
+
+	uncached := request
+	uncached.Text = "new question"
+	_, err = second.Generate(t.Context(), uncached)
+	require.ErrorIs(t, err, execution.ErrBudgetExceeded)
+	require.Equal(t, execution.CachePending, second.LastOutcome().State)
+	require.Equal(t, int64(1), provider.calls.Load())
+}
+
+func TestCachedGeneratorSnapshotOwnsUsagePointers(t *testing.T) {
+	provider := &cachedGeneratorCountingProvider{}
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	decorator, err := NewCachedGenerator(provider, CachedProviderOptions{
+		Cache: cache, Workers: 1, AdapterVersion: "adapter-v1", ContextPolicy: ContextPolicyNameForTest,
+	})
+	require.NoError(t, err)
+	_, err = decorator.Generate(t.Context(), rag.GenerationRequest{
+		Kind: "answer", Model: "model", Prompt: "prompt", Text: "question",
+	})
+	require.NoError(t, err)
+	report := decorator.Snapshot()
+	require.NotNil(t, report.Usage.OutputTokens)
+	*report.Usage.OutputTokens = 999
+	require.EqualValues(t, 3, *decorator.Snapshot().Usage.OutputTokens)
+}
+
+const ContextPolicyNameForTest = "whole-evidence-chunks-v1"
