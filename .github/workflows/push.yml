@@ -1,0 +1,32 @@
+name: Go verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify generated loggers
+        run: make logcopter-check
+      - name: Verify generated files
+        run: |
+          go generate ./...
+          git diff --exit-code
+      - name: Test and build library
+        run: |
+          go test ./... -count=1
+          go vet ./...
+          go build ./...

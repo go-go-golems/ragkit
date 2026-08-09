@@ -1,0 +1,14 @@
+pre-commit:
+  commands:
+    format:
+      glob: '*.go'
+      run: make fmt-check
+    test:
+      glob: '*.go'
+      run: make test
+  parallel: true
+
+pre-push:
+  commands:
+    ci:
+      run: make ci-check
