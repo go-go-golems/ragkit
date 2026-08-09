@@ -274,22 +274,32 @@ func runBulk[I, O any](
 			if lastClass == Fatal || mode == FailFast {
 				return struct{}{}, fmt.Errorf("step %q batch [%s]: %w", s.Name, lastClass, lastErr)
 			}
-			mutex.Lock()
 			for _, group := range current.groups {
 				for _, index := range group.indexes {
+					eventType := EventQuarantined
+					mutex.Lock()
 					if mode == Skip {
 						counts.Skipped++
 						results[index] = Result[O]{Skipped: true}
-						continue
+						eventType = EventSkipped
+					} else {
+						counts.Quarantined++
+						results[index] = Result[O]{Quarantined: &ItemError{
+							Step: s.Name, Index: index, Class: lastClass,
+							Attempts: attempts, Message: lastErr.Error(),
+						}}
 					}
-					counts.Quarantined++
-					results[index] = Result[O]{Quarantined: &ItemError{
-						Step: s.Name, Index: index, Class: lastClass,
-						Attempts: attempts, Message: lastErr.Error(),
-					}}
+					mutex.Unlock()
+					if o.Ledger != nil {
+						if err := o.Ledger.Event(ctx, Event{
+							Step: s.Name, Index: index, Type: eventType,
+							Class: lastClass.String(), Error: lastErr.Error(),
+						}); err != nil {
+							return struct{}{}, fmt.Errorf("step %q: ledger event: %w", s.Name, err)
+						}
+					}
 				}
 			}
-			mutex.Unlock()
 			return struct{}{}, nil
 		}
 

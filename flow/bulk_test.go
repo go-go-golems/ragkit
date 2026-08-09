@@ -150,6 +150,40 @@ func TestBulkFailureModes(t *testing.T) {
 	require.Equal(t, 0, store.Len(), "quarantined batches must not poison the cache")
 }
 
+func TestBulkTerminalOutcomesAreJournaledAndLedgerFailuresPropagate(t *testing.T) {
+	broken := func(_ context.Context, _ []int) ([]int, error) {
+		return nil, AsDataError(errors.New("bulk response malformed"))
+	}
+	for _, test := range []struct {
+		name      string
+		mode      FailureMode
+		eventType EventType
+	}{
+		{name: "quarantine", mode: Quarantine, eventType: EventQuarantined},
+		{name: "skip", mode: Skip, eventType: EventSkipped},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := bulkStep("bulk-" + test.name)
+			base.Policy.OnError = test.mode
+			ledger := &recordingLedger{}
+			_, _, err := Run(t.Context(), Bulk(base, broken, 2), []int{1, 2}, Options{Ledger: ledger})
+			require.NoError(t, err)
+			events := ledger.byType(test.eventType)
+			require.Len(t, events, 2)
+			for index, event := range events {
+				require.Equal(t, index, event.Index)
+				require.Equal(t, DataError.String(), event.Class)
+				require.Contains(t, event.Error, "bulk response malformed")
+			}
+		})
+	}
+
+	base := bulkStep("bulk-ledger-failure")
+	base.Policy.OnError = Quarantine
+	_, _, err := Run(t.Context(), Bulk(base, broken, 2), []int{1}, Options{Ledger: &recordingLedger{fail: true}})
+	require.ErrorContains(t, err, "ledger event")
+}
+
 func TestBulkLengthMismatchIsFatal(t *testing.T) {
 	step := Bulk(bulkStep("short-bulk"), func(_ context.Context, batch []int) ([]int, error) {
 		return make([]int, len(batch)-1), nil

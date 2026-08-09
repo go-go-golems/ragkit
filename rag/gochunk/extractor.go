@@ -247,12 +247,33 @@ func qualify(packagePath, name string) string {
 }
 
 func IsGenerated(text string) bool {
-	lines := strings.SplitN(text, "\n", 12)
-	for _, line := range lines {
+	inBlockComment := false
+	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "// Code generated ") && strings.HasSuffix(trimmed, " DO NOT EDIT.") {
 			return true
 		}
+		if inBlockComment {
+			if end := strings.Index(trimmed, "*/"); end >= 0 {
+				inBlockComment = false
+				if strings.TrimSpace(trimmed[end+2:]) != "" {
+					return false
+				}
+			}
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "/*") {
+			if end := strings.Index(trimmed[2:], "*/"); end < 0 {
+				inBlockComment = true
+			} else if strings.TrimSpace(trimmed[end+4:]) != "" {
+				return false
+			}
+			continue
+		}
+		return false
 	}
 	return false
 }

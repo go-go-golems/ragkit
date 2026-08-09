@@ -27,11 +27,7 @@ func EvidenceIdentities(evidence []Evidence) ([]EvidenceIdentity, error) {
 		}
 		contentDigest := item.Chunk.ContentDigest
 		if contentDigest == "" {
-			var err error
-			contentDigest, err = digest.JSON(item.Chunk.Text)
-			if err != nil {
-				return nil, errors.Wrapf(err, "digest evidence %d", index)
-			}
+			contentDigest = digest.Text(item.Chunk.Text)
 		}
 		ret[index] = EvidenceIdentity{
 			ChunkID:       item.Chunk.ID,

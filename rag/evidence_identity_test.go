@@ -3,6 +3,7 @@ package rag
 import (
 	"testing"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,5 +48,5 @@ func TestEvidenceIdentitiesDeriveMissingContentDigest(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.Len(t, identities, 1)
-	require.NotEmpty(t, identities[0].ContentDigest)
+	require.Equal(t, digest.Text("source text"), identities[0].ContentDigest)
 }

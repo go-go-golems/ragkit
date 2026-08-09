@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -169,8 +170,8 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 		if plan.resource.Budget < 0 {
 			return fmt.Errorf("step %q: resource %q budget must be non-negative", plan.step, name)
 		}
-		if plan.resource.UnitUSD != nil && *plan.resource.UnitUSD < 0 {
-			return fmt.Errorf("step %q: resource %q unit price must be non-negative", plan.step, name)
+		if plan.resource.UnitUSD != nil && (math.IsNaN(*plan.resource.UnitUSD) || math.IsInf(*plan.resource.UnitUSD, 0) || *plan.resource.UnitUSD < 0) {
+			return fmt.Errorf("step %q: resource %q unit price must be finite and non-negative", plan.step, name)
 		}
 		if env.gate != nil && !env.gate.AllowPartial && plan.resource.Budget < plan.resource.Ceiling {
 			return fmt.Errorf(

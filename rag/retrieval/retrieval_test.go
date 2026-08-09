@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -25,6 +26,23 @@ func TestCollapseAndRRF(t *testing.T) {
 	}
 	if len(fused) != 2 {
 		t.Fatalf("fused = %d, want 2", len(fused))
+	}
+}
+
+func TestWeightedRRFRejectsNonFiniteConfiguration(t *testing.T) {
+	t.Parallel()
+	channels := map[string][]rag.Hit{"lexical": {{ChunkID: "chunk", Rank: 1}}}
+	for _, rankConstant := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		_, err := WeightedRRF(channels, RRFConfig{RankConstant: rankConstant})
+		if err == nil {
+			t.Fatalf("WeightedRRF rank constant %v error = nil", rankConstant)
+		}
+	}
+	for _, weight := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		_, err := WeightedRRF(channels, RRFConfig{RankConstant: 60, Weights: map[string]float64{"lexical": weight}})
+		if err == nil {
+			t.Fatalf("WeightedRRF weight %v error = nil", weight)
+		}
 	}
 }
 

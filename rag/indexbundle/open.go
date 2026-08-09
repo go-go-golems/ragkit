@@ -68,6 +68,12 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 		if options.QueryEmbedder == nil {
 			return nil, errors.New("query embedder is required")
 		}
+		if options.EmbeddingProvider != manifest.Vector.Provider {
+			return nil, errors.Errorf(
+				"query embedding provider %q differs from bundle provider %q",
+				options.EmbeddingProvider, manifest.Vector.Provider,
+			)
+		}
 		if options.EmbeddingModel != manifest.Vector.Model {
 			return nil, errors.Errorf(
 				"query embedding model %q differs from bundle model %q",

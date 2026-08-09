@@ -77,6 +77,7 @@ type BuildResult struct {
 type OpenOptions struct {
 	Path                string
 	QueryEmbedder       rag.Embedder
+	EmbeddingProvider   string
 	EmbeddingModel      string
 	EmbeddingDimensions int
 }

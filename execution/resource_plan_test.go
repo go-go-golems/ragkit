@@ -3,6 +3,7 @@ package execution
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,8 @@ func TestValidateResourcePlansRequiresUnpricedAuthorization(t *testing.T) {
 func TestValidateResourcePlansRejectsInvalidPlans(t *testing.T) {
 	t.Parallel()
 	price := -1.0
+	nan := math.NaN()
+	infinity := math.Inf(1)
 	tests := []struct {
 		name  string
 		plans []ResourcePlan
@@ -54,6 +57,8 @@ func TestValidateResourcePlansRejectsInvalidPlans(t *testing.T) {
 		{name: "negative ceiling", plans: []ResourcePlan{{Name: "x", Ceiling: -1}}},
 		{name: "negative budget", plans: []ResourcePlan{{Name: "x", Budget: -1}}},
 		{name: "negative price", plans: []ResourcePlan{{Name: "x", Ceiling: 1, Budget: 1, UnitUSD: &price}}},
+		{name: "NaN price", plans: []ResourcePlan{{Name: "x", Ceiling: 1, Budget: 1, UnitUSD: &nan}}},
+		{name: "infinite price", plans: []ResourcePlan{{Name: "x", Ceiling: 1, Budget: 1, UnitUSD: &infinity}}},
 	}
 	for _, test := range tests {
 		test := test
@@ -64,6 +69,8 @@ func TestValidateResourcePlansRejectsInvalidPlans(t *testing.T) {
 		})
 	}
 	_, err := ValidateResourcePlans(nil, -1, false, false)
+	require.ErrorContains(t, err, "maximum USD")
+	_, err = ValidateResourcePlans(nil, math.NaN(), false, false)
 	require.ErrorContains(t, err, "maximum USD")
 }
 

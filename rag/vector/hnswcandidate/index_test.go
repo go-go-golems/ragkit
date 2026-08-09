@@ -2,6 +2,7 @@ package hnswcandidate
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"testing"
 
@@ -59,6 +60,19 @@ func TestBuildRejectsInconsistentDimensions(t *testing.T) {
 	_, err := Build(fixtureConfig(), []Entry{{"a", "a", "a", []float32{1, 0}}, {"b", "b", "b", []float32{1}}}, fakeEmbedder{})
 	if err == nil {
 		t.Fatal("Build() error = nil, want inconsistent dimensions")
+	}
+}
+
+func TestSearchVectorRejectsInvalidQueriesBeforeGraphSearch(t *testing.T) {
+	t.Parallel()
+	index, err := Build(fixtureConfig(), fixtureEntries(), fakeEmbedder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range [][]float32{{1}, {float32(math.NaN()), 0}, {float32(math.Inf(1)), 0}} {
+		if _, err := index.SearchVector(query, 2); err == nil {
+			t.Fatalf("SearchVector(%v) error = nil", query)
+		}
 	}
 }
 func exactIDs(t *testing.T, entries []Entry, query []float32, limit int) []string {

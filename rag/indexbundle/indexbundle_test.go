@@ -77,7 +77,7 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 	require.Equal(t, first.Path, second.Path)
 
 	bundle, err := Open(t.Context(), OpenOptions{
-		Path: first.Path, QueryEmbedder: input.QueryEmbedder,
+		Path: first.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestOpenAllowsAdmittedDocumentWithoutChunks(t *testing.T) {
 	require.Equal(t, 2, result.Manifest.DocumentCount)
 
 	bundle, err := Open(t.Context(), OpenOptions{
-		Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.NoError(t, err)
@@ -180,12 +180,17 @@ func TestOpenRejectsEmbeddingAndManifestMismatches(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = Open(t.Context(), OpenOptions{
-		Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "other",
+		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+	})
+	require.ErrorContains(t, err, "differs from bundle provider")
+	_, err = Open(t.Context(), OpenOptions{
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 		EmbeddingModel: "other", EmbeddingDimensions: 16,
 	})
 	require.ErrorContains(t, err, "differs from bundle model")
 	_, err = Open(t.Context(), OpenOptions{
-		Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 8,
 	})
 	require.ErrorContains(t, err, "dimensions")
@@ -200,7 +205,7 @@ func TestOpenRejectsEmbeddingAndManifestMismatches(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(manifestPath, data, 0o600))
 	_, err = Open(context.Background(), OpenOptions{
-		Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.ErrorContains(t, err, "counts differ")
@@ -223,7 +228,7 @@ func TestOpenValidatesChunkDigestWithoutRawRepresentations(t *testing.T) {
 	require.NoError(t, os.WriteFile(chunksPath, data, 0o600))
 
 	_, err = Open(t.Context(), OpenOptions{
-		Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.ErrorContains(t, err, "content digest mismatch")
@@ -248,7 +253,7 @@ func TestOpenRejectsPersistedBackendContentChanges(t *testing.T) {
 		require.NoError(t, index.Close())
 
 		_, err = Open(t.Context(), OpenOptions{
-			Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+			Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 			EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 		})
 		require.ErrorContains(t, err, "lexical content differs")
@@ -265,7 +270,7 @@ func TestOpenRejectsPersistedBackendContentChanges(t *testing.T) {
 		require.NoError(t, db.Close())
 
 		_, err = Open(t.Context(), OpenOptions{
-			Path: result.Path, QueryEmbedder: input.QueryEmbedder,
+			Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
 			EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 		})
 		require.ErrorContains(t, err, "vector identity differs")

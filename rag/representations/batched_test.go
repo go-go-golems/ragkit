@@ -237,9 +237,9 @@ func TestGeneratedStatementsBatchedIsDeterministicAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestBatchedCallCeilingCountsGroupsPlusRepairs(t *testing.T) {
-	if got := BatchedCallCeiling(25, 12); got != 3+25 {
-		t.Fatalf("ceiling = %d, want 28", got)
+func TestBatchedCallCeilingAllowsOneDocumentGroupPerChunkPlusRepairs(t *testing.T) {
+	if got := BatchedCallCeiling(25, 12); got != 50 {
+		t.Fatalf("ceiling = %d, want 50", got)
 	}
 	if got := BatchedCallCeiling(0, 12); got != 0 {
 		t.Fatalf("ceiling for zero chunks = %d", got)
