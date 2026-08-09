@@ -124,6 +124,7 @@ func Cached(
 			texts[index] = item.Text
 		}
 		result, err := embedder.Embed(ctx, rag.EmbeddingRequest{Model: options.Model, Texts: texts})
+		usage.Add(result.Usage)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +162,6 @@ func Cached(
 				Model:            options.Model,
 			}
 		}
-		usage.Add(result.Usage)
 		return batchVectors, nil
 	}, options.BatchSize)
 

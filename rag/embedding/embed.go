@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-go-golems/ragkit/rag"
+	vectorutil "github.com/go-go-golems/ragkit/vector"
 )
 
 // Representations embeds representations in explicit provider batches.
@@ -39,6 +40,9 @@ func Representations(
 			return nil, usage, fmt.Errorf("embed batch %d returned %d vectors for %d texts", start/batchSize, len(result.Vectors), len(texts))
 		}
 		for index, values := range result.Vectors {
+			if err := vectorutil.ValidateFinite(values); err != nil {
+				return nil, usage, fmt.Errorf("embed batch %d vector %d: %w", start/batchSize, index, err)
+			}
 			if dimensions == 0 {
 				dimensions = len(values)
 			}

@@ -63,6 +63,34 @@ func TestBuildRejectsInconsistentDimensions(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsNonFiniteMl(t *testing.T) {
+	t.Parallel()
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		config := fixtureConfig()
+		config.Ml = value
+		if _, err := Build(config, fixtureEntries(), fakeEmbedder{}); err == nil {
+			t.Fatalf("Build(Ml=%v) error = nil", value)
+		}
+	}
+}
+
+func TestBuildOwnsEntryVectors(t *testing.T) {
+	t.Parallel()
+	entries := fixtureEntries()
+	index, err := Build(fixtureConfig(), entries, fakeEmbedder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries[1].Values[0] = -1
+	hits, err := index.SearchVector([]float32{1, 0}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].RepresentationID != "rep-a" {
+		t.Fatalf("hits after caller mutation = %#v, want rep-a", hits)
+	}
+}
+
 func TestSearchVectorRejectsInvalidQueriesBeforeGraphSearch(t *testing.T) {
 	t.Parallel()
 	index, err := Build(fixtureConfig(), fixtureEntries(), fakeEmbedder{})

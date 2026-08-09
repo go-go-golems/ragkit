@@ -2,6 +2,7 @@ package hnswcandidate
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"sort"
 	"strings"
@@ -34,7 +35,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Model) == "" {
 		return errors.New("HNSW model is required")
 	}
-	if c.M < 2 || c.Ml <= 0 || c.Ml >= 1 || c.EfConstruction < c.M || c.EfSearch < 1 {
+	if c.M < 2 || math.IsNaN(c.Ml) || math.IsInf(c.Ml, 0) || c.Ml <= 0 || c.Ml >= 1 || c.EfConstruction < c.M || c.EfSearch < 1 {
 		return errors.New("HNSW requires M >= 2, 0 < Ml < 1, ef-construction >= M, and ef-search >= 1")
 	}
 	return nil
@@ -88,6 +89,7 @@ func Build(cfg Config, entries []Entry, embedder rag.Embedder) (*Index, error) {
 		if err := vectorutil.ValidateFinite(entry.Values); err != nil {
 			return nil, errors.Wrapf(err, "validate HNSW representation %q", entry.RepresentationID)
 		}
+		entry.Values = append([]float32(nil), entry.Values...)
 		entryByID[entry.RepresentationID] = entry
 		graph.Add(hnsw.MakeNode(entry.RepresentationID, entry.Values))
 	}

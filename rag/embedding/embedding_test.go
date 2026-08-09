@@ -114,6 +114,17 @@ func TestRepresentationsRejectsDimensionChangesAcrossBatches(t *testing.T) {
 	}
 }
 
+func TestRepresentationsRejectsNonFiniteVectors(t *testing.T) {
+	t.Parallel()
+	embedder := &scriptedEmbedder{results: []scriptedEmbeddingResult{{
+		result: rag.EmbeddingResult{Vectors: [][]float32{{float32(math.NaN())}}},
+	}}}
+	_, _, err := Representations(context.Background(), embedder, "model", []rag.Representation{{ID: "1", Text: "oak"}}, 1)
+	if err == nil || !strings.Contains(err.Error(), "non-finite") {
+		t.Fatalf("Representations() error = %v, want non-finite vector error", err)
+	}
+}
+
 type scriptedEmbeddingResult struct {
 	result rag.EmbeddingResult
 	err    error

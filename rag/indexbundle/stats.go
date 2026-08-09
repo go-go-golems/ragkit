@@ -192,7 +192,7 @@ func (o StatisticsOptions) resolved(maximumRunes int) StatisticsOptions {
 		o.ShortRunes = defaultShortRunes
 	}
 	if o.AtLimitRunes <= 0 {
-		o.AtLimitRunes = maximumRunes - atLimitSlack
+		o.AtLimitRunes = max(1, maximumRunes-atLimitSlack)
 	}
 	return o
 }

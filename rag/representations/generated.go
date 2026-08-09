@@ -150,7 +150,7 @@ func GeneratedQuestions(
 	}
 	reps := make([]rag.Representation, 0, len(chunks)*3)
 	for i, chunk := range chunks {
-		for _, question := range ParseQuestionLines(texts[i]) {
+		for _, question := range uniqueNonemptyLines(ParseQuestionLines(texts[i])) {
 			rep, err := generated(chunk, KindQuestion, question, spec.Model, spec.Prompt)
 			if err != nil {
 				return nil, err

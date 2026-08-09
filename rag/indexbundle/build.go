@@ -77,8 +77,12 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 				existing.BundleID, bundleID,
 			)
 		}
-		if _, validateErr := loadData(finalPath, existing); validateErr != nil {
+		data, validateErr := loadData(finalPath, existing)
+		if validateErr != nil {
 			return BuildResult{}, errors.Wrap(validateErr, "existing bundle is incomplete")
+		}
+		if validateErr := validateStoredIdentity(existing, data); validateErr != nil {
+			return BuildResult{}, errors.Wrap(validateErr, "existing bundle identity is invalid")
 		}
 		return measureResult(ctx, finalPath, existing, true)
 	} else if !os.IsNotExist(statErr) {

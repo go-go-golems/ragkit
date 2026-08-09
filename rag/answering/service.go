@@ -549,11 +549,10 @@ func (s *Service) generateVariants(
 	if err := state.emit(ctx, StageQueryGen, ObservationStarted, started, 0, nil, ""); err != nil {
 		return nil, "", rag.Usage{}, err
 	}
-	format := s.MultiQueryPrompt
-	if format == "" {
-		format = DefaultMultiQueryPrompt
+	prompt := s.MultiQueryPrompt
+	if prompt == "" {
+		prompt = fmt.Sprintf(DefaultMultiQueryPrompt, count, count)
 	}
-	prompt := fmt.Sprintf(format, count, count)
 	raw, err := s.Generator.Generate(ctx, rag.GenerationRequest{
 		Kind: "ttc-query-variants-v1", Model: s.GenerationModel,
 		Prompt: prompt, Text: query.Text,

@@ -46,6 +46,8 @@ func Build(representations []rag.Representation, chunks []rag.Chunk, config Conf
 		config.K1 <= 0 || *config.B < 0 || *config.B > 1 {
 		return nil, fmt.Errorf("invalid BM25 parameters")
 	}
+	b := *config.B
+	config.B = &b
 	if config.Channel == "" {
 		config.Channel = "bm25"
 	}

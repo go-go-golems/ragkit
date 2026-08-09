@@ -304,7 +304,7 @@ func GeneratedQuestionsBatched(
 	reps := make([]rag.Representation, 0, len(chunks)*3)
 	for _, chunk := range chunks {
 		generatedText := texts[chunk.ID]
-		for _, question := range ParseQuestionLines(generatedText.text) {
+		for _, question := range uniqueNonemptyLines(ParseQuestionLines(generatedText.text)) {
 			rep, err := generated(chunk, KindQuestion, question, spec.Model, generatedText.prompt)
 			if err != nil {
 				return nil, err
@@ -341,7 +341,7 @@ func GeneratedStatementsBatched(
 	reps := make([]rag.Representation, 0, len(chunks)*3)
 	for _, chunk := range chunks {
 		generatedText := texts[chunk.ID]
-		for _, statement := range ParseQuestionLines(generatedText.text) {
+		for _, statement := range uniqueNonemptyLines(ParseQuestionLines(generatedText.text)) {
 			rep, err := generated(chunk, KindStatement, statement, spec.Model, generatedText.prompt)
 			if err != nil {
 				return nil, err

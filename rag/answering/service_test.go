@@ -129,6 +129,18 @@ func requestFixture(strategy Strategy) Request {
 	}
 }
 
+func TestGenerateVariantsUsesCustomPromptVerbatim(t *testing.T) {
+	t.Parallel()
+	generator := &fixedGenerator{result: rag.GenerationResult{Text: `{"variants":["rewrite"]}`}}
+	service, _, _ := serviceFixture()
+	service.Generator = generator
+	service.MultiQueryPrompt = "keep 100% of literal %s text"
+	variants, _, _, err := service.generateVariants(t.Context(), &observationState{}, rag.Query{Text: "question"}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []string{"rewrite"}, variants)
+	require.Equal(t, service.MultiQueryPrompt, generator.request.Prompt)
+}
+
 func TestStrategiesPreserveDeterministicRankingsAndContributions(t *testing.T) {
 	service, _, _ := serviceFixture()
 	for _, strategy := range []Strategy{StrategyBM25, StrategyVector, StrategyRRF} {

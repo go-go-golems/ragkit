@@ -149,12 +149,17 @@ func (s ExtractiveSummarizer) Summarize(_ context.Context, chunk rag.Chunk) (str
 	if max <= 0 {
 		max = 300
 	}
-	// Lead sentence: up to the first period, question mark, or newline, capped
-	// at maxRunes. A summary that is the whole chunk is useless, so cap first.
-	if idx := strings.IndexAny(text, ".?!\n"); idx > 0 && idx <= max {
-		return text[:idx+1], nil
-	}
 	runes := []rune(text)
+	// Lead sentence: up to the first period, question mark, or newline, capped
+	// at maxRunes. Both the boundary and the cap are rune offsets.
+	for index, current := range runes {
+		if index > max {
+			break
+		}
+		if index > 0 && strings.ContainsRune(".?!\n", current) {
+			return string(runes[:index+1]), nil
+		}
+	}
 	if len(runes) <= max {
 		return text, nil
 	}
@@ -180,11 +185,7 @@ func Questions(ctx context.Context, chunks []rag.Chunk, questioner Questioner) (
 		if err != nil {
 			return nil, errors.Wrapf(err, "generate questions for chunk %s", chunk.ID)
 		}
-		for _, question := range questions {
-			question = strings.TrimSpace(question)
-			if question == "" {
-				continue
-			}
+		for _, question := range uniqueNonemptyLines(questions) {
 			rep, err := representation(chunk, KindQuestion, question)
 			if err != nil {
 				return nil, err
@@ -193,6 +194,23 @@ func Questions(ctx context.Context, chunks []rag.Chunk, questioner Questioner) (
 		}
 	}
 	return result, nil
+}
+
+func uniqueNonemptyLines(lines []string) []string {
+	seen := make(map[string]struct{}, len(lines))
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if _, exists := seen[line]; exists {
+			continue
+		}
+		seen[line] = struct{}{}
+		result = append(result, line)
+	}
+	return result
 }
 
 // Compose concatenates representation slices, deduplicating by id so a chunk

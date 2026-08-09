@@ -31,3 +31,12 @@ func TestTargetResolver(t *testing.T) {
 	_, err = resolver.HitID(hit, TargetUnit)
 	require.ErrorContains(t, err, "no evaluation unit")
 }
+
+func TestTargetResolverRejectsMissingHitIdentities(t *testing.T) {
+	t.Parallel()
+	resolver := TargetResolver{}
+	for _, target := range []Target{TargetRepresentation, TargetChunk, TargetDocument} {
+		_, err := resolver.HitID(rag.Hit{}, target)
+		require.Error(t, err)
+	}
+}

@@ -77,7 +77,7 @@ func TestEvaluateRankingsAveragesInQueryOrderAndSkips(t *testing.T) {
 	if report.EvaluatedQueries != 2 || report.SkippedQueries != 2 {
 		t.Fatalf("counts = %d/%d", report.EvaluatedQueries, report.SkippedQueries)
 	}
-	if report.MRR != 0.25 || report.RecallAt[10] != 0.5 {
+	if report.MRR != 0.25 || report.PrecisionAt[10] != 0.05 || report.RecallAt[10] != 0.5 {
 		t.Fatalf("report = %+v", report)
 	}
 	if len(report.PerQuery) != 2 || report.PerQuery[0].QueryID != "first" || report.PerQuery[1].QueryID != "empty" {
@@ -94,8 +94,26 @@ func TestEvaluateRankingsEmptySetPreservesCutoffs(t *testing.T) {
 	if report.EvaluatedQueries != 0 || report.SkippedQueries != 1 {
 		t.Fatalf("report = %+v", report)
 	}
+	if _, ok := report.PrecisionAt[5]; !ok {
+		t.Fatal("PrecisionAt[5] is missing")
+	}
 	if _, ok := report.RecallAt[5]; !ok {
 		t.Fatal("RecallAt[5] is missing")
+	}
+}
+
+func TestRetrievalRejectsDuplicateJudgments(t *testing.T) {
+	t.Parallel()
+	_, err := Retrieval(
+		rag.Query{ID: "q"}, []string{"target"},
+		[]rag.Judgment{
+			{QueryID: "q", Target: "document", TargetID: "target", Grade: 1},
+			{QueryID: "q", Target: "document", TargetID: "target", Grade: 2},
+		},
+		[]int{1},
+	)
+	if err == nil {
+		t.Fatal("Retrieval() accepted duplicate judgments")
 	}
 }
 
