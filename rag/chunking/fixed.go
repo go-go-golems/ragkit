@@ -136,7 +136,7 @@ func snapToSentence(text string, byteOffsets []int, runeStart, runeEnd, overlapR
 	if lowest < runeStart+1 {
 		lowest = runeStart + 1
 	}
-	for candidate := runeEnd; candidate > lowest; candidate-- {
+	for candidate := runeEnd; candidate >= lowest; candidate-- {
 		switch text[byteOffsets[candidate-1]:byteOffsets[candidate]] {
 		case ".", "!", "?", "\n":
 			if candidate <= runeStart+overlapRunes {

@@ -107,6 +107,9 @@ func Retrieval(query rag.Query, rankedTargetIDs []string, judgments []rag.Judgme
 		} else if target != judgment.Target {
 			return RetrievalMetrics{}, fmt.Errorf("query %q mixes relevance targets", query.ID)
 		}
+		if math.IsNaN(judgment.Grade) || math.IsInf(judgment.Grade, 0) || judgment.Grade < 0 {
+			return RetrievalMetrics{}, fmt.Errorf("query %q target %q has invalid relevance grade %v", query.ID, judgment.TargetID, judgment.Grade)
+		}
 		relevant[judgment.TargetID] = judgment.Grade
 	}
 	if len(relevant) == 0 {

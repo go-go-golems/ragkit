@@ -48,6 +48,30 @@ func TestHeadingPathResetsDeeperLevels(t *testing.T) {
 	}
 }
 
+func TestHeadingPathIncludesDistinctLevelOneHeading(t *testing.T) {
+	text := "# Governing heading\n\n## Section\n\nbody"
+	chunk := rag.Chunk{Range: rag.Range{ByteStart: strings.Index(text, "body")}}
+	if path := HeadingPath(rag.Document{Title: "Catalog title", Text: text}, chunk); path != "Catalog title > Governing heading > Section" {
+		t.Fatalf("heading path = %q", path)
+	}
+	if path := HeadingPath(rag.Document{Text: text}, chunk); path != "Governing heading > Section" {
+		t.Fatalf("titleless heading path = %q", path)
+	}
+}
+
+func TestParseQuestionLinesPreservesLeadingDigitsOutsideListMarkers(t *testing.T) {
+	questions := ParseQuestionLines("2024 planting guidance\n1. First question\n2) Second question")
+	want := []string{"2024 planting guidance", "First question", "Second question"}
+	if len(questions) != len(want) {
+		t.Fatalf("questions = %#v", questions)
+	}
+	for index := range want {
+		if questions[index] != want[index] {
+			t.Fatalf("question %d = %q, want %q", index, questions[index], want[index])
+		}
+	}
+}
+
 func TestContextualLiteCarriesBlurbAndChunkBody(t *testing.T) {
 	documents, chunks := labChunks()
 	var seenInput string

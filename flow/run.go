@@ -143,6 +143,9 @@ func newRunEnv(rates map[string]execution.Limiter, gate *Preflight) *runEnv {
 func (env *runEnv) ensure(plans []stagePlan) error {
 	env.mutex.Lock()
 	defer env.mutex.Unlock()
+	if env.gate != nil && (math.IsNaN(env.gate.MaxEstimatedUSD) || math.IsInf(env.gate.MaxEstimatedUSD, 0) || env.gate.MaxEstimatedUSD < 0) {
+		return fmt.Errorf("preflight maximum USD must be finite and non-negative")
+	}
 	for _, plan := range plans {
 		name := plan.resource.Name
 		if strings.TrimSpace(name) == "" {
@@ -241,6 +244,42 @@ func (env *runEnv) limiter(name string) execution.Limiter {
 	env.mutex.Lock()
 	defer env.mutex.Unlock()
 	return env.limiters[name]
+}
+
+// admit reserves every named resource as one transaction. Per-resource
+// limiters are themselves reservable chains, so a refusal rolls back budgets
+// and rate tokens acquired for earlier resource names before provider work.
+func (env *runEnv) admit(ctx context.Context, names []string, units int) (string, error) {
+	reservations := make([]execution.Reservation, 0, len(names))
+	rollback := func() {
+		for index := len(reservations) - 1; index >= 0; index-- {
+			reservations[index].Rollback()
+		}
+	}
+	for _, name := range names {
+		limiter := env.limiter(name)
+		if limiter == nil {
+			rollback()
+			return name, fmt.Errorf("resource has no admitted limiter")
+		}
+		if reservable, ok := limiter.(execution.ReservableLimiter); ok {
+			reservation, err := reservable.Reserve(ctx, units)
+			if err != nil {
+				rollback()
+				return name, err
+			}
+			reservations = append(reservations, reservation)
+			continue
+		}
+		if err := limiter.Wait(ctx, units); err != nil {
+			rollback()
+			return name, err
+		}
+	}
+	for _, reservation := range reservations {
+		reservation.Commit()
+	}
+	return "", nil
 }
 
 func (env *runEnv) plan(name string) execution.ResourcePlan {
@@ -846,22 +885,21 @@ func (runner *typedRunner[I, O]) lead(ctx context.Context, index int, item I, ke
 // budget models attempted items, and a retry under the same admission is
 // exactly what today's WithRetry-under-the-cache does.
 func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, key *execution.Key, digestValue string) (erasedItem, error) {
-	for _, name := range runner.resources {
-		if err := runner.options.env.limiter(name).Wait(ctx, 1); err != nil {
-			if errors.Is(err, execution.ErrBudgetExceeded) {
-				plan := runner.options.env.plan(name)
-				return erasedItem{}, fmt.Errorf(
-					"step %q item %d: resource %q admission refused: %w; stated ceiling %d, admitted budget %d — cache hits are free",
-					runner.step.Name, index, name, err, plan.Ceiling, plan.Budget,
-				)
-			}
-			return erasedItem{}, fmt.Errorf("step %q item %d: wait for resource %q: %w", runner.step.Name, index, name, err)
+	if name, err := runner.options.env.admit(ctx, runner.resources, 1); err != nil {
+		if errors.Is(err, execution.ErrBudgetExceeded) {
+			plan := runner.options.env.plan(name)
+			return erasedItem{}, fmt.Errorf(
+				"step %q item %d: resource %q admission refused: %w; stated ceiling %d, admitted budget %d — cache hits are free",
+				runner.step.Name, index, name, err, plan.Ceiling, plan.Budget,
+			)
 		}
+		return erasedItem{}, fmt.Errorf("step %q item %d: wait for resource %q: %w", runner.step.Name, index, name, err)
 	}
 
 	delay := runner.backoff.Base
 	var lastErr error
 	var lastClass ErrorClass
+	attemptsMade := 0
 	for attempt := 1; attempt <= runner.attempts; attempt++ {
 		if attempt > 1 {
 			jittered := retryDelay(delay, runner.backoff.Cap)
@@ -875,6 +913,7 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 				delay = runner.backoff.Cap
 			}
 		}
+		attemptsMade = attempt
 		value, err := runner.step.Do(ctx, item)
 		runner.count(func(counts *StepReport) { counts.WorkCalls++ })
 		if err == nil {
@@ -910,7 +949,7 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 		}
 		break
 	}
-	return runner.fail(ctx, index, lastErr, lastClass)
+	return runner.fail(ctx, index, lastErr, lastClass, attemptsMade)
 }
 
 // success meters and stores one fresh result.
@@ -944,7 +983,7 @@ func (runner *typedRunner[I, O]) success(ctx context.Context, index int, value O
 
 // fail resolves one exhausted item error to its destiny: kill the run,
 // quarantine the item as data, or drop it with a count.
-func (runner *typedRunner[I, O]) fail(ctx context.Context, index int, cause error, class ErrorClass) (erasedItem, error) {
+func (runner *typedRunner[I, O]) fail(ctx context.Context, index int, cause error, class ErrorClass, attempts int) (erasedItem, error) {
 	mode := runner.step.Policy.OnError
 	if class == Fatal || mode == FailFast {
 		return erasedItem{}, fmt.Errorf("step %q item %d [%s]: %w", runner.step.Name, index, class, cause)
@@ -962,7 +1001,7 @@ func (runner *typedRunner[I, O]) fail(ctx context.Context, index int, cause erro
 		Step:     runner.step.Name,
 		Index:    index,
 		Class:    class,
-		Attempts: runner.attempts,
+		Attempts: attempts,
 		Message:  cause.Error(),
 	}
 	runner.count(func(counts *StepReport) { counts.Quarantined++ })

@@ -152,22 +152,8 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 	if len(documentIDs) > manifest.DocumentCount {
 		return bundleData{}, errors.New("bundle chunk document count exceeds manifest corpus count")
 	}
-	for _, representation := range representations {
-		chunk, ok := chunkByID[representation.ChunkID]
-		if !ok {
-			return bundleData{}, errors.Errorf(
-				"bundle representation %q references unknown chunk %q",
-				representation.ID, representation.ChunkID,
-			)
-		}
-		if representation.Kind == "raw" &&
-			(representation.Text != chunk.Text ||
-				representation.ContentDigest != chunk.ContentDigest) {
-			return bundleData{}, errors.Errorf(
-				"raw representation %q differs from chunk %q",
-				representation.ID, chunk.ID,
-			)
-		}
+	if err := rag.ValidateRepresentations(chunks, representations); err != nil {
+		return bundleData{}, errors.Wrap(err, "validate bundle representations")
 	}
 	bleveData, err := os.ReadFile(filepath.Join(path, bleveName, "rag-manifest.json"))
 	if err != nil {

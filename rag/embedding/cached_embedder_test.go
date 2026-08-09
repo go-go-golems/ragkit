@@ -3,6 +3,7 @@ package embedding
 import (
 	"context"
 	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
 
@@ -25,6 +26,16 @@ func (e *failingTextEmbedder) Embed(_ context.Context, request rag.EmbeddingRequ
 
 type countingEmbedder struct {
 	calls atomic.Int64
+}
+
+type vectorByTextEmbedder struct {
+	calls  atomic.Int64
+	vector func(string) []float32
+}
+
+func (e *vectorByTextEmbedder) Embed(_ context.Context, request rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
+	e.calls.Add(1)
+	return rag.EmbeddingResult{Vectors: [][]float32{e.vector(request.Texts[0])}}, nil
 }
 
 func (e *countingEmbedder) Embed(_ context.Context, request rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
@@ -193,5 +204,73 @@ func TestCachedEmbedderRecoversAfterFinalItemFailure(t *testing.T) {
 	}
 	if replayProvider.calls.Load() != 0 || replay.Snapshot().WorkCalls != 0 || zero.Spent() != 0 {
 		t.Fatalf("replay calls=%d spent=%d", replayProvider.calls.Load(), zero.Spent())
+	}
+}
+
+func TestCachedEmbedderDoesNotCacheMalformedProviderVectors(t *testing.T) {
+	for name, vector := range map[string][]float32{
+		"empty": {}, "nan": {float32(math.NaN())}, "infinite": {float32(math.Inf(1))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bad := &vectorByTextEmbedder{vector: func(string) []float32 { return vector }}
+			first, err := NewCachedEmbedder(bad, CachedEmbedderOptions{Cache: cache, Step: "validated-embedding"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := rag.EmbeddingRequest{Model: "model", Texts: []string{"oak"}}
+			if _, err := first.Embed(t.Context(), request); err == nil {
+				t.Fatal("Embed() error = nil")
+			}
+
+			recovered := &vectorByTextEmbedder{vector: func(string) []float32 { return []float32{1} }}
+			second, err := NewCachedEmbedder(recovered, CachedEmbedderOptions{Cache: cache, Step: "validated-embedding"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := second.Embed(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if recovered.calls.Load() != 1 {
+				t.Fatalf("recovered provider calls = %d, malformed entry was cached", recovered.calls.Load())
+			}
+		})
+	}
+}
+
+func TestCachedEmbedderRejectsCrossTextDimensionChangesBeforeCachingMismatch(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changing := &vectorByTextEmbedder{vector: func(text string) []float32 {
+		if text == "maple" {
+			return []float32{1, 2}
+		}
+		return []float32{1}
+	}}
+	first, err := NewCachedEmbedder(changing, CachedEmbedderOptions{Cache: cache, Workers: 1, Step: "dimensioned-embedding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := rag.EmbeddingRequest{Model: "model", Texts: []string{"oak", "maple"}}
+	if _, err := first.Embed(t.Context(), request); err == nil {
+		t.Fatal("Embed() error = nil")
+	}
+
+	recovered := &vectorByTextEmbedder{vector: func(string) []float32 { return []float32{1} }}
+	second, err := NewCachedEmbedder(recovered, CachedEmbedderOptions{Cache: cache, Workers: 1, Step: "dimensioned-embedding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := second.Embed(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered.calls.Load() != 1 || len(result.Vectors[0]) != 1 || len(result.Vectors[1]) != 1 {
+		t.Fatalf("calls=%d vectors=%v", recovered.calls.Load(), result.Vectors)
 	}
 }

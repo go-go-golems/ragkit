@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/execution"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/stretchr/testify/require"
@@ -18,7 +19,7 @@ func generationRequest(text string) rag.GenerationRequest {
 		Kind: "grounded-answer", Model: "chat-model", Prompt: "answer from evidence",
 		Text: text, OutputSchema: `{"type":"object"}`,
 		Evidence: []rag.Evidence{{Chunk: rag.Chunk{
-			ID: "chunk-1", Text: "source text", ContentDigest: "digest-1",
+			ID: "chunk-1", Text: "source text", ContentDigest: digest.Text("source text"),
 		}}},
 	}
 }
@@ -28,13 +29,16 @@ func TestGenerationCacheKeySensitivity(t *testing.T) {
 	baseKey, err := NewGenerationCacheKey(base, "adapter-v1", "evidence-only-v1")
 	require.NoError(t, err)
 	tests := map[string]func(*rag.GenerationRequest, *string, *string){
-		"model":           func(r *rag.GenerationRequest, _, _ *string) { r.Model = "other" },
-		"kind":            func(r *rag.GenerationRequest, _, _ *string) { r.Kind = "other" },
-		"query":           func(r *rag.GenerationRequest, _, _ *string) { r.Text = "other" },
-		"evidence id":     func(r *rag.GenerationRequest, _, _ *string) { r.Evidence[0].Chunk.ID = "chunk-2" },
-		"evidence digest": func(r *rag.GenerationRequest, _, _ *string) { r.Evidence[0].Chunk.ContentDigest = "digest-2" },
+		"model":       func(r *rag.GenerationRequest, _, _ *string) { r.Model = "other" },
+		"kind":        func(r *rag.GenerationRequest, _, _ *string) { r.Kind = "other" },
+		"query":       func(r *rag.GenerationRequest, _, _ *string) { r.Text = "other" },
+		"evidence id": func(r *rag.GenerationRequest, _, _ *string) { r.Evidence[0].Chunk.ID = "chunk-2" },
+		"evidence digest": func(r *rag.GenerationRequest, _, _ *string) {
+			r.Evidence[0].Chunk.Text = "changed source text"
+			r.Evidence[0].Chunk.ContentDigest = digest.Text(r.Evidence[0].Chunk.Text)
+		},
 		"evidence order": func(r *rag.GenerationRequest, _, _ *string) {
-			r.Evidence = append(r.Evidence, rag.Evidence{Chunk: rag.Chunk{ID: "chunk-2", ContentDigest: "digest-2"}})
+			r.Evidence = append(r.Evidence, rag.Evidence{Chunk: rag.Chunk{ID: "chunk-2", Text: "second source", ContentDigest: digest.Text("second source")}})
 			r.Evidence[0], r.Evidence[1] = r.Evidence[1], r.Evidence[0]
 		},
 		"prompt":          func(r *rag.GenerationRequest, _, _ *string) { r.Prompt = "other" },

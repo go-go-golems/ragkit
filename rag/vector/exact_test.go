@@ -86,3 +86,22 @@ func TestExactSearchUsesChunkIDForEqualScores(t *testing.T) {
 		t.Fatalf("first tied chunk = %q, want chunk-a", hits[0].ChunkID)
 	}
 }
+
+func TestNewExactOwnsVectorValues(t *testing.T) {
+	chunks := []rag.Chunk{{ID: "chunk", DocumentID: "doc"}}
+	representations := []rag.Representation{{ID: "rep", ChunkID: "chunk"}}
+	vectors := []rag.Vector{{RepresentationID: "rep", Model: "model", Values: []float32{1, 0}}}
+	index, err := NewExact("model", "vector", fixedEmbedder{vector: []float32{1, 0}}, representations, chunks, vectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vectors[0].Values[0] = 0
+	vectors[0].Values[1] = 1
+	hits, err := index.Search(t.Context(), rag.Query{Text: "query"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Score != 1 {
+		t.Fatalf("mutating caller vectors changed immutable index: %+v", hits)
+	}
+}

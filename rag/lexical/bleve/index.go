@@ -3,6 +3,7 @@ package bleve
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -92,6 +93,10 @@ func CalculateContentDigest(documents []rag.Document, chunks []rag.Chunk, repres
 
 func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []rag.Chunk, representations []rag.Representation) (*Index, Manifest, error) {
 	cfg = defaults(cfg)
+	if math.IsNaN(cfg.TitleBoost) || math.IsInf(cfg.TitleBoost, 0) || cfg.TitleBoost <= 0 ||
+		math.IsNaN(cfg.BodyBoost) || math.IsInf(cfg.BodyBoost, 0) || cfg.BodyBoost <= 0 {
+		return nil, Manifest{}, errors.New("Bleve title and body boosts must be finite and greater than zero")
+	}
 	if err := validateRepresentationIDs(representations); err != nil {
 		return nil, Manifest{}, err
 	}

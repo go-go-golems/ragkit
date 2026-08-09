@@ -21,8 +21,22 @@ func Chain(limiters ...Limiter) Limiter {
 type limiterChain []Limiter
 
 var _ Limiter = limiterChain(nil)
+var _ ReservableLimiter = limiterChain(nil)
 
 func (chain limiterChain) Wait(ctx context.Context, units int) error {
+	reservation, err := chain.Reserve(ctx, units)
+	if err != nil {
+		return err
+	}
+	reservation.Commit()
+	return nil
+}
+
+// Reserve provisionally admits work through every limiter in the chain. A
+// chain is itself reservable, so larger admission transactions can safely
+// compose per-resource budget-and-rate chains without committing an earlier
+// resource when a later resource refuses the same work.
+func (chain limiterChain) Reserve(ctx context.Context, units int) (Reservation, error) {
 	reservations := make([]Reservation, 0, len(chain))
 	rollback := func() {
 		for index := len(reservations) - 1; index >= 0; index-- {
@@ -34,18 +48,20 @@ func (chain limiterChain) Wait(ctx context.Context, units int) error {
 			reservation, err := reservable.Reserve(ctx, units)
 			if err != nil {
 				rollback()
-				return fmt.Errorf("limiter %d: %w", index, err)
+				return nil, fmt.Errorf("limiter %d: %w", index, err)
 			}
 			reservations = append(reservations, reservation)
 			continue
 		}
 		if err := limiter.Wait(ctx, units); err != nil {
 			rollback()
-			return fmt.Errorf("limiter %d: %w", index, err)
+			return nil, fmt.Errorf("limiter %d: %w", index, err)
 		}
 	}
-	for _, reservation := range reservations {
-		reservation.Commit()
+	commit := func() {
+		for _, reservation := range reservations {
+			reservation.Commit()
+		}
 	}
-	return nil
+	return newReservationWithCommit(commit, rollback), nil
 }

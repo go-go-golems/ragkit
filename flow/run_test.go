@@ -227,6 +227,7 @@ func TestRunQuarantineTurnsItemErrorsIntoRecords(t *testing.T) {
 	require.Equal(t, "judge-like", record.Step)
 	require.Equal(t, 1, record.Index)
 	require.Equal(t, DataError, record.Class)
+	require.Equal(t, 1, record.Attempts)
 	require.Contains(t, record.Message, "malformed verdict JSON")
 	require.Equal(t, 1, report.Step("judge-like").Quarantined)
 	require.Equal(t, 0, results[1].Value)
@@ -343,6 +344,33 @@ func TestRunRejectsNonFiniteUnitPriceBeforeWork(t *testing.T) {
 		require.ErrorContains(t, err, "finite and non-negative")
 		require.Zero(t, calls.Load())
 	}
+}
+
+func TestRunRejectsInvalidPreflightMaximumBeforeWork(t *testing.T) {
+	for _, maximum := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		var calls atomic.Int64
+		step := doubler("invalid-gate", Policy{})
+		base := step.Do
+		step.Do = func(ctx context.Context, value int) (int, error) {
+			calls.Add(1)
+			return base(ctx, value)
+		}
+		_, _, err := Run(t.Context(), step, []int{1}, Options{Preflight: &Preflight{MaxEstimatedUSD: maximum}})
+		require.ErrorContains(t, err, "maximum USD must be finite and non-negative")
+		require.Zero(t, calls.Load())
+	}
+}
+
+func TestRunMultiResourceAdmissionRollsBackEarlierBudgets(t *testing.T) {
+	resources := []Resource{
+		{Name: "first", Ceiling: 1, Budget: 1},
+		{Name: "refuses", Ceiling: 1, Budget: 0},
+	}
+	step := doubler("transactional", Policy{Admission: resources})
+	shared := Options{}.Share()
+	_, _, err := Run(t.Context(), step, []int{1}, shared)
+	require.ErrorIs(t, err, execution.ErrBudgetExceeded)
+	require.Equal(t, 0, shared.Snapshots()["first"].Spent)
 }
 
 func TestRunSharedPreflightKeepsRefusingUnpricedPlan(t *testing.T) {

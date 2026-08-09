@@ -198,17 +198,15 @@ func runBulk[I, O any](
 		Workers: max(s.Policy.Workers, 1),
 	}, func(ctx context.Context, current batch) (struct{}, error) {
 		units := len(current.groups)
-		for _, name := range resources {
-			if err := o.env.limiter(name).Wait(ctx, units); err != nil {
-				if errors.Is(err, execution.ErrBudgetExceeded) {
-					plan := o.env.plan(name)
-					return struct{}{}, fmt.Errorf(
-						"step %q: resource %q admission refused a %d-item batch: %w; stated ceiling %d, admitted budget %d — cache hits are free",
-						s.Name, name, units, err, plan.Ceiling, plan.Budget,
-					)
-				}
-				return struct{}{}, fmt.Errorf("step %q: wait for resource %q: %w", s.Name, name, err)
+		if name, err := o.env.admit(ctx, resources, units); err != nil {
+			if errors.Is(err, execution.ErrBudgetExceeded) {
+				plan := o.env.plan(name)
+				return struct{}{}, fmt.Errorf(
+					"step %q: resource %q admission refused a %d-item batch: %w; stated ceiling %d, admitted budget %d — cache hits are free",
+					s.Name, name, units, err, plan.Ceiling, plan.Budget,
+				)
 			}
+			return struct{}{}, fmt.Errorf("step %q: wait for resource %q: %w", s.Name, name, err)
 		}
 
 		batchItems := make([]I, len(current.groups))
@@ -219,6 +217,7 @@ func runBulk[I, O any](
 		var values []O
 		var lastErr error
 		var lastClass ErrorClass
+		attemptsMade := 0
 		for attempt := 1; attempt <= attempts; attempt++ {
 			if attempt > 1 {
 				jittered := retryDelay(delay, backoff.Cap)
@@ -232,6 +231,7 @@ func runBulk[I, O any](
 					delay = backoff.Cap
 				}
 			}
+			attemptsMade = attempt
 			returned, err := doBulk(ctx, batchItems)
 			count(func(counts *StepReport) { counts.WorkCalls++ })
 			if err == nil {
@@ -298,7 +298,7 @@ func runBulk[I, O any](
 						counts.Quarantined++
 						results[index] = Result[O]{Quarantined: &ItemError{
 							Step: s.Name, Index: index, Class: lastClass,
-							Attempts: attempts, Message: lastErr.Error(),
+							Attempts: attemptsMade, Message: lastErr.Error(),
 						}}
 					}
 					mutex.Unlock()
@@ -315,6 +315,14 @@ func runBulk[I, O any](
 			return struct{}{}, nil
 		}
 
+		if s.Meter != nil {
+			for _, value := range values {
+				metered := s.Meter(value)
+				mutex.Lock()
+				meters.Add(metered)
+				mutex.Unlock()
+			}
+		}
 		for position, group := range current.groups {
 			value := values[position]
 			outcome := execution.CacheOutcome{}
@@ -328,12 +336,6 @@ func runBulk[I, O any](
 				count(func(counts *StepReport) { counts.Stored++ })
 				outcome = execution.CacheOutcome{KeyDigest: group.digest, State: execution.CacheStored}
 				eventType = EventStored
-			}
-			if s.Meter != nil {
-				metered := s.Meter(value)
-				mutex.Lock()
-				meters.Add(metered)
-				mutex.Unlock()
 			}
 			mutex.Lock()
 			for _, index := range group.indexes {

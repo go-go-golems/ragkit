@@ -85,11 +85,35 @@ func TestChainCommitsReservationsAfterAllLimitersAccept(t *testing.T) {
 	}
 }
 
+func TestNestedChainPropagatesReservationCommitAndRollback(t *testing.T) {
+	t.Parallel()
+
+	accepted := &deferredLimiter{}
+	if err := Chain(Chain(accepted)).Wait(t.Context(), 2); err != nil {
+		t.Fatal(err)
+	}
+	if accepted.committed != 2 {
+		t.Fatalf("committed units = %d, want 2", accepted.committed)
+	}
+
+	rolledBack := &deferredLimiter{}
+	if err := Chain(Chain(rolledBack), rejectingLimiter{}).Wait(t.Context(), 3); err == nil {
+		t.Fatal("Wait() error = nil, want refusal")
+	}
+	if rolledBack.committed != 0 {
+		t.Fatalf("rolled-back committed units = %d, want 0", rolledBack.committed)
+	}
+}
+
 type probeLimiter struct {
 	calls int
 }
 
 type rejectingLimiter struct{}
+
+type deferredLimiter struct {
+	committed int
+}
 
 func (rejectingLimiter) Wait(context.Context, int) error {
 	return errors.New("refused")
@@ -98,4 +122,17 @@ func (rejectingLimiter) Wait(context.Context, int) error {
 func (limiter *probeLimiter) Wait(context.Context, int) error {
 	limiter.calls++
 	return nil
+}
+
+func (limiter *deferredLimiter) Wait(ctx context.Context, units int) error {
+	reservation, err := limiter.Reserve(ctx, units)
+	if err != nil {
+		return err
+	}
+	reservation.Commit()
+	return nil
+}
+
+func (limiter *deferredLimiter) Reserve(_ context.Context, units int) (Reservation, error) {
+	return newReservationWithCommit(func() { limiter.committed += units }, nil), nil
 }

@@ -167,7 +167,36 @@ func TestBulkFailureModes(t *testing.T) {
 	require.Equal(t, 3, report.Step("bulk-quarantine").Quarantined)
 	require.NotNil(t, results[2].Quarantined)
 	require.Equal(t, 2, results[2].Quarantined.Index)
+	require.Equal(t, 1, results[2].Quarantined.Attempts)
 	require.Equal(t, 0, store.Len(), "quarantined batches must not poison the cache")
+}
+
+type rejectingStore struct{}
+
+func (rejectingStore) Load(context.Context, execution.Key, any) (bool, error) { return false, nil }
+func (rejectingStore) Store(context.Context, execution.Key, any) error {
+	return errors.New("simulated store failure")
+}
+
+func TestBulkMetersCompletedProviderWorkBeforeStoreFailure(t *testing.T) {
+	base := bulkStep("meter-before-store")
+	base.Meter = func(value int) Meters { return Meters{"tokens": float64(value)} }
+	step := Bulk(base, doubleAll(nil, nil, nil), 10)
+	_, report, err := Run(t.Context(), step, []int{1, 2}, Options{Store: rejectingStore{}})
+	require.ErrorContains(t, err, "simulated store failure")
+	require.Equal(t, Meters{"tokens": 6}, report.Step("meter-before-store").Meters)
+}
+
+func TestBulkMultiResourceAdmissionRollsBackEarlierBudgets(t *testing.T) {
+	base := bulkStep("transactional-bulk")
+	base.Policy.Admission = []Resource{
+		{Name: "bulk-first", Ceiling: 2, Budget: 2},
+		{Name: "bulk-refuses", Ceiling: 2, Budget: 1},
+	}
+	shared := Options{}.Share()
+	_, _, err := Run(t.Context(), Bulk(base, doubleAll(nil, nil, nil), 2), []int{1, 2}, shared)
+	require.ErrorIs(t, err, execution.ErrBudgetExceeded)
+	require.Equal(t, 0, shared.Snapshots()["bulk-first"].Spent)
 }
 
 func TestBulkTerminalOutcomesAreJournaledAndLedgerFailuresPropagate(t *testing.T) {

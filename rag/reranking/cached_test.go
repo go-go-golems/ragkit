@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/execution"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/stretchr/testify/require"
@@ -15,7 +16,7 @@ func rerankingRequest(query string) rag.RerankRequest {
 	return rag.RerankRequest{
 		Model: "rerank-model", Query: rag.Query{Text: query}, Results: 1,
 		Candidates: []rag.Evidence{{Chunk: rag.Chunk{
-			ID: "chunk-1", Text: "source text", ContentDigest: "digest-1",
+			ID: "chunk-1", Text: "source text", ContentDigest: digest.Text("source text"),
 		}}},
 	}
 }
@@ -25,13 +26,16 @@ func TestCacheKeySensitivity(t *testing.T) {
 	baseKey, err := NewCacheKey(base, "adapter-v1")
 	require.NoError(t, err)
 	tests := map[string]func(*rag.RerankRequest, *string){
-		"model":            func(r *rag.RerankRequest, _ *string) { r.Model = "other" },
-		"query":            func(r *rag.RerankRequest, _ *string) { r.Query.Text = "other" },
-		"candidate id":     func(r *rag.RerankRequest, _ *string) { r.Candidates[0].Chunk.ID = "chunk-2" },
-		"candidate digest": func(r *rag.RerankRequest, _ *string) { r.Candidates[0].Chunk.ContentDigest = "digest-2" },
+		"model":        func(r *rag.RerankRequest, _ *string) { r.Model = "other" },
+		"query":        func(r *rag.RerankRequest, _ *string) { r.Query.Text = "other" },
+		"candidate id": func(r *rag.RerankRequest, _ *string) { r.Candidates[0].Chunk.ID = "chunk-2" },
+		"candidate digest": func(r *rag.RerankRequest, _ *string) {
+			r.Candidates[0].Chunk.Text = "changed source text"
+			r.Candidates[0].Chunk.ContentDigest = digest.Text(r.Candidates[0].Chunk.Text)
+		},
 		"candidate order": func(r *rag.RerankRequest, _ *string) {
 			r.Candidates = append(r.Candidates, rag.Evidence{Chunk: rag.Chunk{
-				ID: "chunk-2", ContentDigest: "digest-2",
+				ID: "chunk-2", Text: "second source", ContentDigest: digest.Text("second source"),
 			}})
 			r.Candidates[0], r.Candidates[1] = r.Candidates[1], r.Candidates[0]
 		},
