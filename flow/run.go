@@ -332,7 +332,7 @@ func Run[I, O any](ctx context.Context, s Step[I, O], items []I, o Options) ([]R
 		return nil, Report{}, err
 	}
 	if s.override != nil {
-		return s.override(ctx, items, o)
+		return s.override(ctx, items, o, s.OnResult)
 	}
 
 	inputs := make([]erasedItem, len(items))
@@ -880,22 +880,10 @@ func (runner *typedRunner[I, O]) lead(ctx context.Context, index int, item I, ke
 	return runner.work(ctx, index, item, &key, digestValue)
 }
 
-// work admits, retries, and stores one fresh call. WorkCalls counts every
-// Do invocation, retries included; admission charges once per item — the
-// budget models attempted items, and a retry under the same admission is
-// exactly what today's WithRetry-under-the-cache does.
+// work admits, retries, and stores one fresh call. Every Do invocation,
+// retries included, obtains its own admission because Policy.Admission prices
+// work calls rather than logical items. Cache hits never enter this path.
 func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, key *execution.Key, digestValue string) (erasedItem, error) {
-	if name, err := runner.options.env.admit(ctx, runner.resources, 1); err != nil {
-		if errors.Is(err, execution.ErrBudgetExceeded) {
-			plan := runner.options.env.plan(name)
-			return erasedItem{}, fmt.Errorf(
-				"step %q item %d: resource %q admission refused: %w; stated ceiling %d, admitted budget %d — cache hits are free",
-				runner.step.Name, index, name, err, plan.Ceiling, plan.Budget,
-			)
-		}
-		return erasedItem{}, fmt.Errorf("step %q item %d: wait for resource %q: %w", runner.step.Name, index, name, err)
-	}
-
 	delay := runner.backoff.Base
 	var lastErr error
 	var lastClass ErrorClass
@@ -912,6 +900,16 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 			if delay > runner.backoff.Cap {
 				delay = runner.backoff.Cap
 			}
+		}
+		if name, err := runner.options.env.admit(ctx, runner.resources, 1); err != nil {
+			if errors.Is(err, execution.ErrBudgetExceeded) {
+				plan := runner.options.env.plan(name)
+				return erasedItem{}, fmt.Errorf(
+					"step %q item %d attempt %d: resource %q admission refused: %w; stated ceiling %d, admitted budget %d — cache hits are free",
+					runner.step.Name, index, attempt, name, err, plan.Ceiling, plan.Budget,
+				)
+			}
+			return erasedItem{}, fmt.Errorf("step %q item %d attempt %d: wait for resource %q: %w", runner.step.Name, index, attempt, name, err)
 		}
 		attemptsMade = attempt
 		value, err := runner.step.Do(ctx, item)

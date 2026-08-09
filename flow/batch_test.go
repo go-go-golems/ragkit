@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/go-go-golems/ragkit/execution"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -92,6 +93,46 @@ func TestBatchedHappyPathUsesOnlyGroupCalls(t *testing.T) {
 	require.Equal(t, int64(0), repairCalls.Load(), "a healthy run needs no repairs")
 	require.Equal(t, 3, report.Step("chunk-groups").Items)
 	require.Equal(t, 0, report.Step("chunk").Items)
+}
+
+func TestBatchedOuterResultHookSeesSplitAndRepairedItems(t *testing.T) {
+	var repairCalls atomic.Int64
+	spec := BatchSpec[string, string]{
+		Policy: Policy{Workers: 1},
+		Group:  groupsOf(3),
+		DoAll: func(_ context.Context, group []string) (string, error) {
+			return fmt.Sprintf(`{"0":"batched:%s","2":"batched:%s"}`, group[0], group[2]), nil
+		},
+		Split: splitJSON,
+	}
+	step := Batched(chunkStep(&repairCalls), spec)
+	seen := map[int]string{}
+	step.OnResult = func(_ context.Context, index int, value string, _ execution.CacheOutcome) error {
+		seen[index] = value
+		return nil
+	}
+	results, _, err := Run(context.Background(), step, []string{"a", "b", "c"}, Options{})
+	require.NoError(t, err)
+	require.Equal(t, "repaired:b", results[1].Value)
+	require.Equal(t, map[int]string{0: "batched:a", 1: "repaired:b", 2: "batched:c"}, seen)
+	require.Equal(t, int64(1), repairCalls.Load())
+}
+
+func TestBatchedOuterResultHookFailureFailsRun(t *testing.T) {
+	spec := BatchSpec[string, string]{
+		Policy: Policy{Workers: 1},
+		Group:  groupsOf(1),
+		DoAll: func(_ context.Context, _ []string) (string, error) {
+			return `{"0":"batched:a"}`, nil
+		},
+		Split: splitJSON,
+	}
+	step := Batched(chunkStep(nil), spec)
+	step.OnResult = func(context.Context, int, string, execution.CacheOutcome) error {
+		return errors.New("artifact writer failed")
+	}
+	_, _, err := Run(context.Background(), step, []string{"a"}, Options{})
+	require.ErrorContains(t, err, "result hook")
 }
 
 func TestBatchedRepairsMissingAndUnparseableItems(t *testing.T) {

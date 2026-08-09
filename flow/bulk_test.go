@@ -139,6 +139,22 @@ func TestBulkRetriesTransientBatchFailures(t *testing.T) {
 	}
 }
 
+func TestBulkChargesEveryRetryAttemptAgainstAdmission(t *testing.T) {
+	base := bulkStep("budgeted-bulk-retry")
+	base.Policy.Retry = fastRetry(3)
+	base.Policy.Admission = []Resource{{Name: "embedding-items", Ceiling: 6, Budget: 2}}
+	var calls atomic.Int64
+	step := Bulk(base, func(_ context.Context, _ []int) ([]int, error) {
+		calls.Add(1)
+		return nil, errors.New("unexpected EOF")
+	}, 10)
+	_, report, err := Run(context.Background(), step, []int{1, 2}, Options{Store: NewMemoryStore()})
+	require.ErrorIs(t, err, execution.ErrBudgetExceeded)
+	require.Equal(t, int64(1), calls.Load(), "a refused bulk retry must not invoke provider work")
+	require.Equal(t, 1, report.Step("budgeted-bulk-retry").WorkCalls)
+	require.Equal(t, execution.BudgetSnapshot{Limit: 2, Spent: 2, Remaining: 0}, report.Step("budgeted-bulk-retry").Spend["embedding-items"])
+}
+
 func TestBulkRetryLedgerFailurePropagates(t *testing.T) {
 	base := bulkStep("retry-ledger-failure")
 	base.Policy.Retry = fastRetry(2)

@@ -178,6 +178,26 @@ func TestRunRetriesTransientErrorsWithCounts(t *testing.T) {
 	require.Equal(t, 3, report.Step("flaky").WorkCalls)
 }
 
+func TestRunChargesEveryRetryAttemptAgainstAdmission(t *testing.T) {
+	var calls atomic.Int64
+	step := Step[int, int]{
+		Name: "budgeted-retry",
+		Policy: Policy{
+			Retry:     fastRetry(3),
+			Admission: []Resource{{Name: "provider-calls", Ceiling: 3, Budget: 1}},
+		},
+		Do: func(_ context.Context, _ int) (int, error) {
+			calls.Add(1)
+			return 0, errors.New("unexpected EOF")
+		},
+	}
+	_, report, err := Run(context.Background(), step, []int{1}, Options{})
+	require.ErrorIs(t, err, execution.ErrBudgetExceeded)
+	require.Equal(t, int64(1), calls.Load(), "a refused retry must not invoke provider work")
+	require.Equal(t, 1, report.Step("budgeted-retry").WorkCalls)
+	require.Equal(t, execution.BudgetSnapshot{Limit: 1, Spent: 1, Remaining: 0}, report.Step("budgeted-retry").Spend["provider-calls"])
+}
+
 func TestRunDoesNotRetryFatalOrCancellation(t *testing.T) {
 	var calls atomic.Int64
 	fatal := Step[int, int]{
