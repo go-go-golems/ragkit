@@ -410,9 +410,10 @@ func (s *Service) prepare(ctx context.Context, request Request, retrieved Retrie
 		request.Config.MaximumContextRunes,
 	)
 	prepared := Prepared{
-		Request:   request,
-		Retrieval: retrieved,
-		Context:   contextResult,
+		Request:       request,
+		Retrieval:     retrieved,
+		Context:       contextResult,
+		CitationStyle: s.CitationStyle,
 		GenerationRequest: rag.GenerationRequest{
 			Kind:         s.contractKind(),
 			Model:        s.GenerationModel,
@@ -422,7 +423,7 @@ func (s *Service) prepare(ctx context.Context, request Request, retrieved Retrie
 			OutputSchema: s.OutputSchema,
 		},
 	}
-	if s.CitationStyle == CitationStyleOrdinal {
+	if prepared.CitationStyle == CitationStyleOrdinal {
 		prepared.CitationLabels = make(map[string]string, len(prepared.Context.Evidence))
 		for index := range prepared.Context.Evidence {
 			label := fmt.Sprintf("E%d", index+1)
@@ -444,13 +445,13 @@ func (s *Service) interpret(ctx context.Context, prepared Prepared, raw rag.Gene
 	if err := state.emit(ctx, StageContract, ObservationStarted, started, 0, nil, ""); err != nil {
 		return Result{}, err
 	}
-	if s.CitationStyle == CitationStyleOrdinal {
+	if prepared.CitationStyle == CitationStyleOrdinal {
 		if err := validateCitationLabels(prepared); err != nil {
 			return Result{}, err
 		}
 	}
 	answer, contract := ParseGroundedAnswer(raw.Text, prepared.Context.Evidence)
-	if contract.Valid && s.CitationStyle == CitationStyleOrdinal {
+	if contract.Valid && prepared.CitationStyle == CitationStyleOrdinal {
 		for index, label := range answer.CitationChunkIDs {
 			chunkID, ok := prepared.CitationLabels[label]
 			if !ok {

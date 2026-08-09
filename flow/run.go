@@ -1004,12 +1004,18 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 			return erasedItem{}, fmt.Errorf("step %q item %d attempt %d: wait for resource %q: %w", runner.step.Name, index, attempt, name, err)
 		}
 		attemptsMade = attempt
+		if attempt == 1 {
+			runner.count(func(counts *StepReport) { counts.StartedSequences++ })
+		}
 		value, err := runner.step.Do(ctx, item)
 		runner.count(func(counts *StepReport) { counts.WorkCalls++ })
 		if runner.step.AttemptMeter != nil {
 			metered := runner.step.AttemptMeter(value, err)
 			runner.mutex.Lock()
-			runner.meters.Add(metered)
+			if err := runner.meters.AddChecked(metered); err != nil {
+				runner.mutex.Unlock()
+				return erasedItem{}, fmt.Errorf("step %q item %d: %w", runner.step.Name, index, err)
+			}
 			runner.mutex.Unlock()
 		}
 		if err == nil {
@@ -1056,7 +1062,10 @@ func (runner *typedRunner[I, O]) success(ctx context.Context, index int, value O
 	if runner.step.Meter != nil {
 		metered := runner.step.Meter(value)
 		runner.mutex.Lock()
-		runner.meters.Add(metered)
+		if err := runner.meters.AddChecked(metered); err != nil {
+			runner.mutex.Unlock()
+			return erasedItem{}, fmt.Errorf("step %q item %d: %w", runner.step.Name, index, err)
+		}
 		runner.mutex.Unlock()
 	}
 	result := erasedItem{index: index, value: value}

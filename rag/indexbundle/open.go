@@ -28,6 +28,9 @@ func LoadManifest(path string) (Manifest, error) {
 	if strings.TrimSpace(manifest.BundleID) == "" {
 		return Manifest{}, errors.New("bundle manifest has no bundle ID")
 	}
+	if manifest.DocumentCount < 0 || manifest.ChunkCount < 0 || manifest.RepresentationCount < 0 {
+		return Manifest{}, errors.New("bundle manifest counts must be non-negative")
+	}
 	return manifest, nil
 }
 

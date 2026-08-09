@@ -232,13 +232,19 @@ func runBulk[I, O any](
 				return struct{}{}, fmt.Errorf("step %q attempt %d: wait for resource %q: %w", s.Name, attempt, name, err)
 			}
 			attemptsMade = attempt
+			if attempt == 1 {
+				count(func(counts *StepReport) { counts.StartedSequences++ })
+			}
 			returned, err := doBulk(ctx, batchItems)
 			count(func(counts *StepReport) { counts.WorkCalls++ })
 			if s.AttemptMeter != nil {
 				for _, value := range returned {
 					metered := s.AttemptMeter(value, err)
 					mutex.Lock()
-					meters.Add(metered)
+					if meterErr := meters.AddChecked(metered); meterErr != nil {
+						mutex.Unlock()
+						return struct{}{}, fmt.Errorf("step %q: %w", s.Name, meterErr)
+					}
 					mutex.Unlock()
 				}
 			}
@@ -330,7 +336,10 @@ func runBulk[I, O any](
 			for _, value := range values {
 				metered := s.Meter(value)
 				mutex.Lock()
-				meters.Add(metered)
+				if meterErr := meters.AddChecked(metered); meterErr != nil {
+					mutex.Unlock()
+					return struct{}{}, fmt.Errorf("step %q: %w", s.Name, meterErr)
+				}
 				mutex.Unlock()
 			}
 		}

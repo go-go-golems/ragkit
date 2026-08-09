@@ -63,6 +63,14 @@ func TestWeightedRRFRejectsInvalidRanks(t *testing.T) {
 	}
 }
 
+func TestWeightedRRFRejectsConflictingChunkDocuments(t *testing.T) {
+	_, err := WeightedRRF(map[string][]rag.Hit{
+		"lexical": {{ChunkID: "chunk", DocumentID: "doc-a", Rank: 1}},
+		"vector":  {{ChunkID: "chunk", DocumentID: "doc-b", Rank: 1}},
+	}, RRFConfig{RankConstant: 60})
+	require.ErrorContains(t, err, "conflicting document identities")
+}
+
 func TestWeightedRRFUsesChunkIDAsFinalTieBreaker(t *testing.T) {
 	t.Parallel()
 	fused, err := WeightedRRF(map[string][]rag.Hit{

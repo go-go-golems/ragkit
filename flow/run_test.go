@@ -600,6 +600,24 @@ func TestRunAttemptMeterCountsFailedAttempts(t *testing.T) {
 	require.Equal(t, Meters{"tokens": 10}, report.Step("failed-meter").Meters)
 }
 
+func TestRunRejectsNonFiniteMeterValues(t *testing.T) {
+	for name, configure := range map[string]func(*Step[int, int]){
+		"success meter": func(step *Step[int, int]) {
+			step.Meter = func(int) Meters { return Meters{"cost_usd": math.NaN()} }
+		},
+		"attempt meter": func(step *Step[int, int]) {
+			step.AttemptMeter = func(int, error) Meters { return Meters{"cost_usd": math.Inf(1)} }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			step := doubler("non-finite-meter", Policy{})
+			configure(&step)
+			_, _, err := Run(t.Context(), step, []int{1}, Options{})
+			require.ErrorContains(t, err, "meter \"cost_usd\" is not finite")
+		})
+	}
+}
+
 func TestRunRejectsNegativeRetryAttempts(t *testing.T) {
 	step := doubler("negative-retry", Policy{Retry: RetrySpec{Attempts: -1}})
 	_, _, err := Run(t.Context(), step, []int{1}, Options{})

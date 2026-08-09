@@ -3,7 +3,9 @@ package sqliteexact
 import (
 	"context"
 	"math"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -63,6 +65,14 @@ func TestBuildSearchReopen(t *testing.T) {
 	}
 	if len(hits) != 2 || hits[0].RepresentationID != "rep-a" {
 		t.Fatalf("unexpected reopened hits: %#v", hits)
+	}
+}
+
+func TestSQLiteURIEncodesPathBeforeParameters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vectors?#.sqlite")
+	uri := sqliteURI(path, url.Values{"mode": {"ro"}})
+	if strings.Contains(uri, "?#.sqlite?") || !strings.Contains(uri, "%3F%23") {
+		t.Fatalf("SQLite URI %q does not encode path separators", uri)
 	}
 }
 

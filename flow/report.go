@@ -2,6 +2,8 @@ package flow
 
 import (
 	"context"
+	"fmt"
+	"math"
 
 	"github.com/go-go-golems/ragkit/execution"
 )
@@ -18,20 +20,38 @@ func (meters Meters) Add(other Meters) {
 	}
 }
 
+// AddChecked merges only finite meter values and refuses an overflowing sum.
+// Provider-derived cost and usage must remain serializable at the execution
+// boundary rather than failing later while a durable report is encoded.
+func (meters Meters) AddChecked(other Meters) error {
+	for name, value := range other {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return fmt.Errorf("meter %q is not finite", name)
+		}
+		combined := meters[name] + value
+		if math.IsNaN(combined) || math.IsInf(combined, 0) {
+			return fmt.Errorf("meter %q total is not finite", name)
+		}
+	}
+	meters.Add(other)
+	return nil
+}
+
 // StepReport counts one step's execution: items seen, cache traffic, retry
 // pressure, quarantine and skip decisions, admission spend, and meters.
 type StepReport struct {
-	Items          int                                 `json:"items"`
-	Hits           int                                 `json:"hits"`
-	Misses         int                                 `json:"misses"`
-	Stored         int                                 `json:"stored"`
-	WorkCalls      int                                 `json:"work_calls"`
-	Retries        int                                 `json:"retries"`
-	Quarantined    int                                 `json:"quarantined"`
-	Skipped        int                                 `json:"skipped"`
-	RetriesByClass map[string]int                      `json:"retries_by_class,omitempty"`
-	Spend          map[string]execution.BudgetSnapshot `json:"spend,omitempty"`
-	Meters         Meters                              `json:"meters,omitempty"`
+	Items            int                                 `json:"items"`
+	Hits             int                                 `json:"hits"`
+	Misses           int                                 `json:"misses"`
+	Stored           int                                 `json:"stored"`
+	WorkCalls        int                                 `json:"work_calls"`
+	StartedSequences int                                 `json:"started_sequences"`
+	Retries          int                                 `json:"retries"`
+	Quarantined      int                                 `json:"quarantined"`
+	Skipped          int                                 `json:"skipped"`
+	RetriesByClass   map[string]int                      `json:"retries_by_class,omitempty"`
+	Spend            map[string]execution.BudgetSnapshot `json:"spend,omitempty"`
+	Meters           Meters                              `json:"meters,omitempty"`
 }
 
 // merge adds other's counts into the report (same step name run twice).
@@ -41,6 +61,7 @@ func (report *StepReport) merge(other StepReport) {
 	report.Misses += other.Misses
 	report.Stored += other.Stored
 	report.WorkCalls += other.WorkCalls
+	report.StartedSequences += other.StartedSequences
 	report.Retries += other.Retries
 	report.Quarantined += other.Quarantined
 	report.Skipped += other.Skipped

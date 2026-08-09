@@ -131,6 +131,10 @@ type Prepared struct {
 	// CitationLabels maps model-facing evidence labels back to immutable chunk
 	// IDs. It is populated only for ordinal citation presentation.
 	CitationLabels map[string]string `json:"citation_labels,omitempty"`
+	// CitationStyle is the model-facing style used to prepare this value. It
+	// travels with serialized Prepared work so interpretation does not depend
+	// on mutable service configuration.
+	CitationStyle CitationStyle `json:"citation_style"`
 }
 
 // RetrievalAugmenter transforms a completed baseline retrieval result before
