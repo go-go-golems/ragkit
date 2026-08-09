@@ -126,3 +126,15 @@ func TestExtractiveSummarizerRecognizesQuestionAndExclamationEndings(t *testing.
 		}
 	}
 }
+
+func TestExtractiveSummarizerUsesRuneOffsetsForSentenceBoundaries(t *testing.T) {
+	t.Parallel()
+	text := "éééé? Later sentence."
+	summary, err := (ExtractiveSummarizer{MaxRunes: 5}).Summarize(context.Background(), chunk("chunk", text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary != "éééé?" {
+		t.Fatalf("summary = %q, want rune-safe first sentence", summary)
+	}
+}

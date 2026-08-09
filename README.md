@@ -43,8 +43,8 @@ Changes relative to rag-ttc:
 
 - Module path `github.com/go-go-golems/ragkit`; logcopter areas renamed.
 - Representation prompts moved from package constants to an injectable
-  `representations.PromptSet` (`DefaultPromptSet()` keeps the upstream texts
-  verbatim for cache compatibility).
+	`representations.PromptSet`; callers construct and own their domain prompts
+	explicitly.
 - The grounded-answer contract kind is injectable via
   `answering.Service.ContractKind` (default `ttc-grounded-answer-v1`).
 - Dataset tests use self-contained fixtures instead of the TTC corpora.

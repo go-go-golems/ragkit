@@ -73,10 +73,17 @@ func TestDocumentSummariesAreDeterministicAcrossRuns(t *testing.T) {
 
 func TestDocumentSummariesRequireAChunkToHydrateTo(t *testing.T) {
 	documents, _ := batchedFixture(1)
+	called := false
 	_, err := DocumentSummaries(context.Background(), documents, nil,
-		documentSummaryGenerate(t, documents), GeneratedSpec{Model: "glm", Prompt: "doc-sum"})
+		func(context.Context, []rag.GenerationRequest) ([]rag.GenerationResult, error) {
+			called = true
+			return nil, nil
+		}, GeneratedSpec{Model: "glm", Prompt: "doc-sum"})
 	if err == nil {
 		t.Fatal("a document without chunks must fail, not produce inadmissible evidence")
+	}
+	if called {
+		t.Fatal("generation was called before hydration preflight completed")
 	}
 }
 

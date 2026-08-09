@@ -114,6 +114,15 @@ func TestAtLimitAllowsSlackBelowTheChunkerMaximum(t *testing.T) {
 	require.Equal(t, 1, exact.Count(SignalAtLimit))
 }
 
+func TestAtLimitDefaultRemainsEnabledForSmallMaximum(t *testing.T) {
+	statistics := measureChunks(
+		[]rag.Chunk{{ID: "c", DocumentID: "d", Text: text(5)}},
+		5,
+		StatisticsOptions{},
+	)
+	require.Equal(t, 1, statistics.Count(SignalAtLimit))
+}
+
 // heading-cut is short and no-overlap together, and it must be both.
 func TestHeadingCutRequiresBothConditions(t *testing.T) {
 	chunks := []rag.Chunk{

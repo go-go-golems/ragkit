@@ -132,6 +132,21 @@ func TestGeneratedQuestionsSplitsAndStripsLines(t *testing.T) {
 	}
 }
 
+func TestGeneratedQuestionsDeduplicatesNormalizedLines(t *testing.T) {
+	_, chunks := labChunks()
+	reps, err := GeneratedQuestions(
+		context.Background(), chunks,
+		echoBatch("- Same question?\n2. Same question?\nDifferent question?"),
+		GeneratedSpec{Model: "glm", Prompt: "ask"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reps) != 2 {
+		t.Fatalf("question reps = %d, want 2 unique lines: %+v", len(reps), reps)
+	}
+}
+
 func TestEntityExpansionsAppendsOneLine(t *testing.T) {
 	_, chunks := labChunks()
 	generate := echoBatch("Thuja Green Giant\narborvitae, Thuja standishii × plicata")

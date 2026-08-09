@@ -96,6 +96,24 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 	require.NoError(t, bundle.Close(), "close must be idempotent")
 }
 
+func TestBuildRejectsReuseWhenStoredSemanticIdentityIsCorrupt(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	result, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	manifestPath := filepath.Join(result.Path, manifestName)
+	data, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+	var manifest Manifest
+	require.NoError(t, json.Unmarshal(data, &manifest))
+	manifest.CorpusDigest = "corrupt"
+	data, err = json.Marshal(manifest)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(manifestPath, data, 0o600))
+
+	_, err = Build(t.Context(), input)
+	require.ErrorContains(t, err, "existing bundle identity is invalid")
+}
+
 func TestOpenAllowsAdmittedDocumentWithoutChunks(t *testing.T) {
 	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
 	input.Documents = append(input.Documents, rag.Document{

@@ -26,6 +26,7 @@ type Report struct {
 	EvaluatedQueries int                `json:"evaluated_queries"`
 	SkippedQueries   int                `json:"skipped_queries"`
 	MRR              float64            `json:"mrr"`
+	PrecisionAt      map[int]float64    `json:"precision_at"`
 	RecallAt         map[int]float64    `json:"recall_at"`
 	NDCGAt           map[int]float64    `json:"ndcg_at"`
 	HitRateAt        map[int]float64    `json:"hit_rate_at"`
@@ -44,15 +45,17 @@ func EvaluateRankings(
 		return Report{}, err
 	}
 	report := Report{
-		RecallAt:  make(map[int]float64, len(cutoffs)),
-		NDCGAt:    make(map[int]float64, len(cutoffs)),
-		HitRateAt: make(map[int]float64, len(cutoffs)),
-		PerQuery:  make([]RetrievalMetrics, 0, len(queries)),
+		PrecisionAt: make(map[int]float64, len(cutoffs)),
+		RecallAt:    make(map[int]float64, len(cutoffs)),
+		NDCGAt:      make(map[int]float64, len(cutoffs)),
+		HitRateAt:   make(map[int]float64, len(cutoffs)),
+		PerQuery:    make([]RetrievalMetrics, 0, len(queries)),
 	}
 	for _, cutoff := range cutoffs {
 		if cutoff < 1 {
 			return Report{}, fmt.Errorf("cutoffs must be positive")
 		}
+		report.PrecisionAt[cutoff] = 0
 		report.RecallAt[cutoff] = 0
 		report.NDCGAt[cutoff] = 0
 		report.HitRateAt[cutoff] = 0
@@ -75,6 +78,7 @@ func EvaluateRankings(
 		report.PerQuery = append(report.PerQuery, metrics)
 		report.MRR += metrics.MRR
 		for _, cutoff := range cutoffs {
+			report.PrecisionAt[cutoff] += metrics.PrecisionAt[cutoff]
 			report.RecallAt[cutoff] += metrics.RecallAt[cutoff]
 			report.NDCGAt[cutoff] += metrics.NDCGAt[cutoff]
 			report.HitRateAt[cutoff] += metrics.HitRateAt[cutoff]
@@ -87,6 +91,7 @@ func EvaluateRankings(
 	count := float64(report.EvaluatedQueries)
 	report.MRR /= count
 	for _, cutoff := range cutoffs {
+		report.PrecisionAt[cutoff] /= count
 		report.RecallAt[cutoff] /= count
 		report.NDCGAt[cutoff] /= count
 		report.HitRateAt[cutoff] /= count
@@ -109,6 +114,9 @@ func Retrieval(query rag.Query, rankedTargetIDs []string, judgments []rag.Judgme
 		}
 		if math.IsNaN(judgment.Grade) || math.IsInf(judgment.Grade, 0) || judgment.Grade < 0 {
 			return RetrievalMetrics{}, fmt.Errorf("query %q target %q has invalid relevance grade %v", query.ID, judgment.TargetID, judgment.Grade)
+		}
+		if _, exists := relevant[judgment.TargetID]; exists {
+			return RetrievalMetrics{}, fmt.Errorf("query %q has duplicate %s judgment for target %q", query.ID, judgment.Target, judgment.TargetID)
 		}
 		relevant[judgment.TargetID] = judgment.Grade
 	}

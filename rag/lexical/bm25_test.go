@@ -63,3 +63,24 @@ func TestBM25PreservesExplicitZeroB(t *testing.T) {
 		t.Fatalf("first tied chunk = %q, want chunk-ID order starting with long", hits[0].ChunkID)
 	}
 }
+
+func TestBM25OwnsConfigurationValues(t *testing.T) {
+	t.Parallel()
+	b := 0.0
+	chunks := []rag.Chunk{
+		{ID: "short", DocumentID: "short", Text: "oak"},
+		{ID: "long", DocumentID: "long", Text: "oak filler filler filler"},
+	}
+	index, err := Build(generation.Raw(chunks), chunks, Config{B: &b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = 1
+	hits, err := index.Search(context.Background(), rag.Query{Text: "oak"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits[0].Score != hits[1].Score {
+		t.Fatalf("caller mutation changed stored B: scores = %v and %v", hits[0].Score, hits[1].Score)
+	}
+}

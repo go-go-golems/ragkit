@@ -43,28 +43,13 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	representationDigest, err := digest.JSON(data.representations)
-	if err != nil {
+	if err := validateStoredIdentity(manifest, data); err != nil {
 		return nil, err
-	}
-	kinds := representationKinds(data.representations)
-	expectedID, err := calculateIDFromDigests(
-		manifest.CorpusDigest, representationDigest, kinds,
-		manifest.Chunker, manifest.Lexical, manifest.Vector,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if expectedID != manifest.BundleID || !reflect.DeepEqual(kinds, manifest.RepresentationKinds) {
-		return nil, errors.New("bundle manifest identity does not match stored data")
 	}
 	// Lexical-only bundles (no vector identity) are a supported serving and
 	// rollback configuration: they open without an embedder and expose a nil
 	// Vector index.
 	if manifest.Vector != nil {
-		if manifest.Vector.RepresentationDigest != representationDigest {
-			return nil, errors.New("bundle vector representation digest mismatch")
-		}
 		if options.QueryEmbedder == nil {
 			return nil, errors.New("query embedder is required")
 		}
@@ -109,6 +94,30 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 		Representations: data.representations,
 		Lexical:         lexical, Vector: vector,
 	}, nil
+}
+
+func validateStoredIdentity(manifest Manifest, data bundleData) error {
+	representationDigest, err := digest.JSON(data.representations)
+	if err != nil {
+		return err
+	}
+	kinds := representationKinds(data.representations)
+	expectedID, err := calculateIDFromDigests(
+		manifest.CorpusDigest, representationDigest, kinds,
+		manifest.Chunker, manifest.Lexical, manifest.Vector,
+	)
+	if err != nil {
+		return err
+	}
+	if expectedID != manifest.BundleID || !reflect.DeepEqual(kinds, manifest.RepresentationKinds) {
+		return errors.New("bundle manifest identity does not match stored data")
+	}
+	if manifest.Vector != nil {
+		if manifest.Vector.RepresentationDigest != representationDigest {
+			return errors.New("bundle vector representation digest mismatch")
+		}
+	}
+	return nil
 }
 
 type bundleData struct {

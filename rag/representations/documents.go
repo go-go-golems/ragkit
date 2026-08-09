@@ -42,6 +42,11 @@ func DocumentSummaries(
 			firstChunk[chunk.DocumentID] = chunk
 		}
 	}
+	for _, document := range documents {
+		if _, ok := firstChunk[document.ID]; !ok {
+			return nil, errors.Errorf("document %q has no chunks to hydrate its summary to", document.ID)
+		}
+	}
 	requests := make([]rag.GenerationRequest, len(documents))
 	for i, document := range documents {
 		requests[i] = rag.GenerationRequest{
@@ -62,10 +67,7 @@ func DocumentSummaries(
 		if text == "" {
 			continue
 		}
-		chunk, ok := firstChunk[document.ID]
-		if !ok {
-			return nil, errors.Errorf("document %q has no chunks to hydrate its summary to", document.ID)
-		}
+		chunk := firstChunk[document.ID]
 		rep, err := generated(chunk, KindDocumentSummary, text, spec.Model, spec.Prompt)
 		if err != nil {
 			return nil, err

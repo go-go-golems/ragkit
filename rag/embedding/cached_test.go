@@ -139,6 +139,21 @@ func TestCachedRejectsInvalidProviderVectors(t *testing.T) {
 	}
 }
 
+func TestCachedReportsUsageWhenProviderVectorsAreInvalid(t *testing.T) {
+	t.Parallel()
+	tokens := int64(3)
+	embedder := embeddingFunc(func(_ context.Context, _ rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
+		return rag.EmbeddingResult{
+			Vectors: nil,
+			Usage:   rag.Usage{EmbeddingTokens: &tokens},
+		}, nil
+	})
+	result, err := Cached(context.Background(), embedder, testItems(1), cachedTestOptions(newTestCache(t), nil))
+	require.Error(t, err)
+	require.NotNil(t, result.Usage.EmbeddingTokens)
+	require.EqualValues(t, 3, *result.Usage.EmbeddingTokens)
+}
+
 func TestCachedRejectsDimensionsThatDifferAcrossBatches(t *testing.T) {
 	t.Parallel()
 	cache := newTestCache(t)
