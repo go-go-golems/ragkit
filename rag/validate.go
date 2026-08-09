@@ -9,19 +9,33 @@ import (
 	"github.com/go-go-golems/ragkit/digest"
 )
 
-// ValidateHits rejects search results that cannot be serialized or ranked
-// consistently. Search backends own identity and ordering details; every
-// backend result must nevertheless have finite scores and positive ranks.
-func ValidateHits(hits []Hit) error {
+// ValidateHitScores rejects search results that cannot be ranked or serialized
+// consistently. It is suitable for generic retrieval transforms that only need
+// score/rank closure, even when a synthetic test or local transform does not
+// carry every identity field.
+func ValidateHitScores(hits []Hit) error {
 	for index, hit := range hits {
-		if strings.TrimSpace(hit.RepresentationID) == "" || strings.TrimSpace(hit.ChunkID) == "" || strings.TrimSpace(hit.DocumentID) == "" {
-			return fmt.Errorf("hit %d has incomplete identity", index)
-		}
 		if hit.Rank < 1 {
 			return fmt.Errorf("hit %d has invalid rank %d", index, hit.Rank)
 		}
 		if math.IsNaN(hit.Score) || math.IsInf(hit.Score, 0) {
 			return fmt.Errorf("hit %d has a non-finite score", index)
+		}
+	}
+	return nil
+}
+
+// ValidateHits rejects search results that cannot be serialized or ranked
+// consistently. Search backends own identity and ordering details; every
+// backend result must nevertheless have finite scores, positive ranks, and
+// complete source identities before crossing the answering boundary.
+func ValidateHits(hits []Hit) error {
+	if err := ValidateHitScores(hits); err != nil {
+		return err
+	}
+	for index, hit := range hits {
+		if strings.TrimSpace(hit.RepresentationID) == "" || strings.TrimSpace(hit.ChunkID) == "" || strings.TrimSpace(hit.DocumentID) == "" {
+			return fmt.Errorf("hit %d has incomplete identity", index)
 		}
 	}
 	return nil

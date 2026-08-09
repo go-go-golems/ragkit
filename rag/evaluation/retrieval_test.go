@@ -43,6 +43,20 @@ func TestRetrievalNDCGRemainsFiniteForLargeGrades(t *testing.T) {
 	}
 }
 
+func TestRetrievalNDCGPreservesTinyPositiveGrades(t *testing.T) {
+	metrics, err := Retrieval(
+		rag.Query{ID: "q"}, []string{"target"},
+		[]rag.Judgment{{QueryID: "q", Target: "document", TargetID: "target", Grade: 1e-20}},
+		[]int{1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metrics.NDCGAt[1] != 1 {
+		t.Fatalf("NDCG@1 = %.20g, want 1", metrics.NDCGAt[1])
+	}
+}
+
 func TestRetrievalRejectsInvalidRelevanceGrades(t *testing.T) {
 	for _, grade := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		_, err := Retrieval(

@@ -95,3 +95,10 @@ func TestCollapseUsesChunkIDBeforeRepresentationIDForTiedRanks(t *testing.T) {
 		t.Fatalf("ordered IDs = [%s %s], want [chunk-a chunk-z]", collapsed[0].ChunkID, collapsed[1].ChunkID)
 	}
 }
+
+func TestCollapseRejectsNonFiniteHitScores(t *testing.T) {
+	for _, score := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		_, err := Collapse([]rag.Hit{{ChunkID: "chunk", Rank: 1, Score: score}}, TargetChunk)
+		require.ErrorContains(t, err, "non-finite score")
+	}
+}

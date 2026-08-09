@@ -52,22 +52,28 @@ func UsageFromMeters(meters flow.Meters) rag.Usage {
 
 // CachedReportFromFlow reproduces the CachedProviderReport shape the
 // GenerateCached era serialized into run summaries, from one flow step's
-// results and report. WorkCalls subtracts retries because the legacy report
-// counted work sequences (retry lived inside one call), while flow counts
-// every attempt.
+// results and report. The legacy report counts a work sequence only when at
+// least one provider attempt ran; flow counts every physical attempt. A retry
+// can be scheduled but then canceled or refused before a second Do call, so
+// sequence counting must not simply subtract Retries. A physical attempt also
+// cannot outnumber items that were not served from cache.
 func CachedReportFromFlow(results []flow.Result[GenerationCacheEnvelope], report flow.StepReport) CachedProviderReport {
 	converted := CachedProviderReport{Usage: UsageFromMeters(report.Meters)}
 	converted.Cache = execution.CacheReport{
 		Hits:      report.Hits,
 		Misses:    report.Misses,
 		Writes:    report.Stored,
-		WorkCalls: report.WorkCalls - report.Retries,
+		WorkCalls: workSequences(report),
 		Outcomes:  make([]execution.CacheOutcome, len(results)),
 	}
 	for index, result := range results {
 		converted.Cache.Outcomes[index] = result.Cache
 	}
 	return converted
+}
+
+func workSequences(report flow.StepReport) int {
+	return min(report.WorkCalls, max(0, report.Items-report.Hits))
 }
 
 // FlowBatcher implements the representations.BatchGenerate contract on the
@@ -117,7 +123,7 @@ func (batcher *FlowBatcher) generate(ctx context.Context, requests []rag.Generat
 	freshUsage := UsageFromMeters(stepReport.Meters)
 	batcher.mutex.Lock()
 	batcher.hits += stepReport.Hits
-	batcher.workCalls += stepReport.WorkCalls - stepReport.Retries
+	batcher.workCalls += workSequences(stepReport)
 	batcher.usage.Add(freshUsage)
 	batcher.mutex.Unlock()
 	if err != nil {

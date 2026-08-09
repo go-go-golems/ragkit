@@ -8,6 +8,17 @@ import (
 	"github.com/go-go-golems/ragkit/rag"
 )
 
+func TestRepresentationConveniencesRejectNilCollaborators(t *testing.T) {
+	_, err := Summaries(t.Context(), nil, nil)
+	if err == nil {
+		t.Fatal("Summaries accepted a nil summarizer")
+	}
+	_, err = Questions(t.Context(), nil, nil)
+	if err == nil {
+		t.Fatal("Questions accepted a nil questioner")
+	}
+}
+
 func chunk(id, text string) rag.Chunk {
 	return rag.Chunk{
 		ID: id, DocumentID: "doc", Text: text,

@@ -172,6 +172,9 @@ func (s ExtractiveSummarizer) Summarize(_ context.Context, chunk rag.Chunk) (str
 // Summaries is a convenience that builds summary representations for every
 // chunk using a summarizer.
 func Summaries(ctx context.Context, chunks []rag.Chunk, summarizer Summarizer) ([]rag.Representation, error) {
+	if summarizer == nil {
+		return nil, errors.New("summarizer is required")
+	}
 	return FromChunks(ctx, chunks, KindSummary, summarizer.Summarize)
 }
 
@@ -179,6 +182,9 @@ func Summaries(ctx context.Context, chunks []rag.Chunk, summarizer Summarizer) (
 // that yields several questions produces several representations, all pointing
 // at the same source chunk.
 func Questions(ctx context.Context, chunks []rag.Chunk, questioner Questioner) ([]rag.Representation, error) {
+	if questioner == nil {
+		return nil, errors.New("questioner is required")
+	}
 	result := make([]rag.Representation, 0, len(chunks))
 	for _, chunk := range chunks {
 		if err := ctx.Err(); err != nil {
