@@ -55,8 +55,8 @@ func UsageFromMeters(meters flow.Meters) rag.Usage {
 // results and report. The legacy report counts a work sequence only when at
 // least one provider attempt ran; flow counts every physical attempt. A retry
 // can be scheduled but then canceled or refused before a second Do call, so
-// sequence counting must not simply subtract Retries. A physical attempt also
-// cannot outnumber items that were not served from cache.
+// flow records a started sequence exactly when its first provider attempt
+// begins.
 func CachedReportFromFlow(results []flow.Result[GenerationCacheEnvelope], report flow.StepReport) CachedProviderReport {
 	converted := CachedProviderReport{Usage: UsageFromMeters(report.Meters)}
 	converted.Cache = execution.CacheReport{
@@ -73,7 +73,7 @@ func CachedReportFromFlow(results []flow.Result[GenerationCacheEnvelope], report
 }
 
 func workSequences(report flow.StepReport) int {
-	return min(report.WorkCalls, max(0, report.Items-report.Hits))
+	return report.StartedSequences
 }
 
 // FlowBatcher implements the representations.BatchGenerate contract on the

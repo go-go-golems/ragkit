@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
@@ -70,6 +71,16 @@ func TestNewExactRejectsDuplicateRepresentationVectors(t *testing.T) {
 	}
 	if _, err := NewExact("model", "vector", &embedding.HashEmbedder{Dimensions: 1}, representations, chunks, vectors); err == nil {
 		t.Fatal("NewExact() accepted duplicate representation vectors")
+	}
+}
+
+func TestNewExactRejectsDuplicateRepresentationIDs(t *testing.T) {
+	chunks := []rag.Chunk{{ID: "chunk-a", DocumentID: "doc-a"}, {ID: "chunk-b", DocumentID: "doc-b"}}
+	representations := []rag.Representation{{ID: "rep", ChunkID: "chunk-a"}, {ID: "rep", ChunkID: "chunk-b"}}
+	vectors := []rag.Vector{{RepresentationID: "rep", Model: "model", Values: []float32{1}}}
+	_, err := NewExact("model", "vector", &embedding.HashEmbedder{Dimensions: 1}, representations, chunks, vectors)
+	if err == nil || !strings.Contains(err.Error(), "duplicate representation") {
+		t.Fatalf("NewExact error = %v, want duplicate representation rejection", err)
 	}
 }
 

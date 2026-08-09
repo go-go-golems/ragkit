@@ -39,6 +39,9 @@ func (chunker *Markdown) Chunk(ctx context.Context, document rag.Document) ([]ra
 	if err := validateWindow(chunker.MaxSectionRunes, chunker.OverlapRunes); err != nil {
 		return nil, err
 	}
+	if chunker.SentenceSnapRunes < 0 {
+		return nil, fmt.Errorf("sentence snap runes must be non-negative")
+	}
 	if err := rag.ValidateDocument(document); err != nil {
 		return nil, err
 	}

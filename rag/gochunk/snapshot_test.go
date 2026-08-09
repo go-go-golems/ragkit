@@ -58,6 +58,36 @@ func TestDecideAdmissionAppliesTestdataLimitAtRepositoryRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestCommittedReadsUseTheResolvedCommit(t *testing.T) {
+	repository := t.TempDir()
+	writeFixture(t, filepath.Join(repository, "go.mod"), "module example.org/old\n")
+	writeFixture(t, filepath.Join(repository, "pkg", "old.go"), "package pkg\n")
+	runGit(t, repository, "init", "-q")
+	runGit(t, repository, "config", "user.email", "fixture@example.com")
+	runGit(t, repository, "config", "user.name", "Fixture")
+	runGit(t, repository, "add", ".")
+	runGit(t, repository, "commit", "-qm", "old")
+	head, err := repositoryHead(context.Background(), "fixture", repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(repository, "go.mod"), "module example.org/new\n")
+	writeFixture(t, filepath.Join(repository, "pkg", "new.go"), "package pkg\n")
+	runGit(t, repository, "add", ".")
+	runGit(t, repository, "commit", "-qm", "new")
+	module, err := repositoryModulePath(context.Background(), repository, head.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := trackedPaths(context.Background(), repository, head.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if module != "example.org/old" || len(paths) != 2 || paths[1] != "pkg/old.go" {
+		t.Fatalf("resolved commit read = module %q paths %#v", module, paths)
+	}
+}
 func writeFixture(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

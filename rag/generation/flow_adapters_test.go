@@ -57,6 +57,6 @@ func TestFlowBatcherCountsAStartedSequenceWhenRetryAdmissionRefuses(t *testing.T
 	require.Zero(t, hits)
 	require.Equal(t, 1, workCalls)
 
-	report := CachedReportFromFlow(nil, flow.StepReport{Items: 1, Misses: 1, WorkCalls: 1, Retries: 1})
+	report := CachedReportFromFlow(nil, flow.StepReport{Items: 1, Misses: 1, WorkCalls: 1, StartedSequences: 1, Retries: 1})
 	require.Equal(t, 1, report.Cache.WorkCalls)
 }

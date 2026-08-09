@@ -427,3 +427,9 @@ func TestInspectNamesTheWorkingDirectoryForARelativeCorpus(t *testing.T) {
 	require.Contains(t, inspection.Corpus.Reason, "resolved against")
 	require.Contains(t, inspection.Corpus.Reason, working)
 }
+
+func TestLoadManifestRejectsNegativeCounts(t *testing.T) {
+	directory := writeBundle(t, Manifest{DocumentCount: -1}, nil)
+	_, err := LoadManifest(directory)
+	require.ErrorContains(t, err, "counts must be non-negative")
+}

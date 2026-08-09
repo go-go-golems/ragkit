@@ -66,6 +66,14 @@ func TestSentenceSnapChangesTheChunkerName(t *testing.T) {
 	}
 }
 
+func TestSentenceSnapRejectsNegativeWindow(t *testing.T) {
+	chunker := &Markdown{MaxSectionRunes: 100, OverlapRunes: 10, SentenceSnapRunes: -1}
+	_, err := chunker.Chunk(context.Background(), snapDocument("sentence."))
+	if err == nil || !strings.Contains(err.Error(), "sentence snap runes") {
+		t.Fatalf("Chunk error = %v, want negative sentence snap rejection", err)
+	}
+}
+
 func TestSentenceSnapStillTerminatesOnPathologicalText(t *testing.T) {
 	// Periods everywhere: snapping must never stall the window.
 	document := snapDocument(strings.Repeat(".", 500))

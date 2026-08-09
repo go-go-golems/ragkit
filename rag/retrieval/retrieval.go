@@ -91,6 +91,8 @@ func WeightedRRF(channels map[string][]rag.Hit, config RRFConfig) ([]rag.FusedHi
 			if entry == nil {
 				entry = &rag.FusedHit{ChunkID: hit.ChunkID, DocumentID: hit.DocumentID}
 				byChunk[hit.ChunkID] = entry
+			} else if entry.DocumentID != hit.DocumentID {
+				return nil, fmt.Errorf("chunk %q has conflicting document identities %q and %q", hit.ChunkID, entry.DocumentID, hit.DocumentID)
 			}
 			value := weight / (config.RankConstant + float64(hit.Rank))
 			entry.Score += value

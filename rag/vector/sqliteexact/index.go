@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,7 +85,7 @@ func Build(ctx context.Context, cfg Config, representations []rag.Representation
 			_ = os.Remove(temporaryPath)
 		}
 	}()
-	db, err := sql.Open("sqlite3", temporaryPath+"?_foreign_keys=on")
+	db, err := sql.Open("sqlite3", sqliteURI(temporaryPath, url.Values{"_foreign_keys": {"on"}}))
 	if err != nil {
 		return nil, errors.Wrap(err, "open SQLite vector database")
 	}
@@ -171,7 +172,7 @@ func Open(path, model, channel string, embedder rag.Embedder) (*Index, error) {
 	if embedder == nil {
 		return nil, errors.New("query embedder is required")
 	}
-	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	db, err := sql.Open("sqlite3", sqliteURI(path, url.Values{"mode": {"ro"}}))
 	if err != nil {
 		return nil, errors.Wrap(err, "open SQLite vector database")
 	}
@@ -195,7 +196,7 @@ func Open(path, model, channel string, embedder rag.Embedder) (*Index, error) {
 
 // Inspect returns the persisted vector identity without opening a searcher.
 func Inspect(path string) (Manifest, error) {
-	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	db, err := sql.Open("sqlite3", sqliteURI(path, url.Values{"mode": {"ro"}}))
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "open SQLite exact index for inspection")
 	}
@@ -206,7 +207,7 @@ func Inspect(path string) (Manifest, error) {
 // ReadEntries returns all persisted vectors in stable representation-ID
 // order. The returned values are detached from the database connection.
 func ReadEntries(ctx context.Context, path string) ([]Entry, Manifest, error) {
-	db, err := sql.Open("sqlite3", "file:"+path+"?mode=ro")
+	db, err := sql.Open("sqlite3", sqliteURI(path, url.Values{"mode": {"ro"}}))
 	if err != nil {
 		return nil, Manifest{}, errors.Wrap(err, "open SQLite exact index for reading")
 	}
@@ -220,6 +221,10 @@ func ReadEntries(ctx context.Context, path string) ([]Entry, Manifest, error) {
 		return nil, Manifest{}, err
 	}
 	return entries, manifest, nil
+}
+
+func sqliteURI(path string, parameters url.Values) string {
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: parameters.Encode()}).String()
 }
 
 func readEntriesDB(ctx context.Context, db *sql.DB, expected int) ([]Entry, error) {

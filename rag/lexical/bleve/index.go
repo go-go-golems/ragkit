@@ -11,6 +11,7 @@ import (
 
 	blevelib "github.com/blevesearch/bleve/v2"
 	"github.com/go-go-golems/ragkit/digest"
+	"github.com/go-go-golems/ragkit/internal/fsutil"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/pkg/errors"
 )
@@ -207,8 +208,24 @@ func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []r
 	if err != nil {
 		return nil, Manifest{}, errors.Wrap(err, "marshal Bleve manifest")
 	}
-	if err := os.WriteFile(filepath.Join(temporary, "rag-manifest.json"), append(manifestData, '\n'), 0o600); err != nil {
+	manifestPath := filepath.Join(temporary, "rag-manifest.json")
+	manifestFile, err := os.OpenFile(manifestPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, Manifest{}, errors.Wrap(err, "open Bleve manifest")
+	}
+	if _, err := manifestFile.Write(append(manifestData, '\n')); err != nil {
+		_ = manifestFile.Close()
 		return nil, Manifest{}, errors.Wrap(err, "write Bleve manifest")
+	}
+	if err := manifestFile.Sync(); err != nil {
+		_ = manifestFile.Close()
+		return nil, Manifest{}, errors.Wrap(err, "sync Bleve manifest")
+	}
+	if err := manifestFile.Close(); err != nil {
+		return nil, Manifest{}, errors.Wrap(err, "close Bleve manifest")
+	}
+	if err := fsutil.SyncDirectory(temporary); err != nil {
+		return nil, Manifest{}, errors.Wrap(err, "sync Bleve manifest directory")
 	}
 	if err := index.Close(); err != nil {
 		return nil, Manifest{}, errors.Wrap(err, "close built Bleve index")

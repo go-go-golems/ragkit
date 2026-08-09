@@ -321,6 +321,23 @@ func TestOrdinalCitationsRejectMutatedLabelMapping(t *testing.T) {
 	require.ErrorContains(t, err, "unauthorized chunk")
 }
 
+func TestInterpretUsesPreparedCitationStyle(t *testing.T) {
+	service, _, _ := serviceFixture()
+	service.CitationStyle = CitationStyleOrdinal
+	request := requestFixture(StrategyBM25)
+	retrieved, err := service.Retrieve(t.Context(), request)
+	require.NoError(t, err)
+	prepared, err := service.Prepare(t.Context(), request, retrieved)
+	require.NoError(t, err)
+	service.CitationStyle = CitationStyleChunkID
+	result, err := service.Interpret(t.Context(), prepared, rag.GenerationResult{
+		Text: `{"answer":"A.","citation_chunk_ids":["E1"],"abstained":false}`,
+	})
+	require.NoError(t, err)
+	require.True(t, result.Contract.Valid)
+	require.Equal(t, []string{"chunk-a"}, result.Answer.CitationChunkIDs)
+}
+
 type traceAugmenter struct{}
 
 func (traceAugmenter) Augment(_ context.Context, result RetrievalResult, _ []rag.Chunk) (RetrievalResult, json.RawMessage, error) {

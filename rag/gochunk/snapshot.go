@@ -83,11 +83,11 @@ func LoadCommitted(ctx context.Context, manifestPath string, policy Policy) (Loa
 			return LoadResult{}, err
 		}
 		result.Snapshot.Repositories = append(result.Snapshot.Repositories, head)
-		modulePath, err := repositoryModulePath(ctx, repository.WorktreePath)
+		modulePath, err := repositoryModulePath(ctx, repository.WorktreePath, head.Commit)
 		if err != nil {
 			return LoadResult{}, errors.Wrapf(err, "read module path for %s", repository.Name)
 		}
-		paths, err := trackedPaths(ctx, repository.WorktreePath)
+		paths, err := trackedPaths(ctx, repository.WorktreePath, head.Commit)
 		if err != nil {
 			return LoadResult{}, errors.Wrapf(err, "list tracked files for %s", repository.Name)
 		}
@@ -95,7 +95,7 @@ func LoadCommitted(ctx context.Context, manifestPath string, policy Policy) (Loa
 			if !strings.HasSuffix(strings.ToLower(path), ".go") {
 				continue
 			}
-			body, err := gitOutput(ctx, repository.WorktreePath, "show", "--no-ext-diff", "HEAD:"+path)
+			body, err := gitOutput(ctx, repository.WorktreePath, "show", "--no-ext-diff", head.Commit+":"+path)
 			if err != nil {
 				return LoadResult{}, errors.Wrapf(err, "read %s:%s", repository.Name, path)
 			}
@@ -128,14 +128,14 @@ func repositoryHead(ctx context.Context, name, path string) (RepositoryHead, err
 	if err != nil {
 		return RepositoryHead{}, errors.Wrapf(err, "resolve %s HEAD", name)
 	}
-	tree, err := gitOutput(ctx, path, "rev-parse", "HEAD^{tree}")
+	tree, err := gitOutput(ctx, path, "rev-parse", strings.TrimSpace(string(commit))+"^{tree}")
 	if err != nil {
 		return RepositoryHead{}, errors.Wrapf(err, "resolve %s tree", name)
 	}
 	return RepositoryHead{Name: name, Path: path, Commit: strings.TrimSpace(string(commit)), Tree: strings.TrimSpace(string(tree))}, nil
 }
-func trackedPaths(ctx context.Context, repository string) ([]string, error) {
-	output, err := gitOutput(ctx, repository, "ls-tree", "-r", "-z", "--name-only", "HEAD")
+func trackedPaths(ctx context.Context, repository, commit string) ([]string, error) {
+	output, err := gitOutput(ctx, repository, "ls-tree", "-r", "-z", "--name-only", commit)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +149,8 @@ func trackedPaths(ctx context.Context, repository string) ([]string, error) {
 	sort.Strings(paths)
 	return paths, nil
 }
-func repositoryModulePath(ctx context.Context, repository string) (string, error) {
-	body, err := gitOutput(ctx, repository, "show", "--no-ext-diff", "HEAD:go.mod")
+func repositoryModulePath(ctx context.Context, repository, commit string) (string, error) {
+	body, err := gitOutput(ctx, repository, "show", "--no-ext-diff", commit+":go.mod")
 	if err != nil {
 		return "", err
 	}

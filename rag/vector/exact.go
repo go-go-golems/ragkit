@@ -38,6 +38,9 @@ func NewExact(
 	}
 	representationByID := make(map[string]rag.Representation, len(representations))
 	for _, representation := range representations {
+		if _, exists := representationByID[representation.ID]; exists {
+			return nil, fmt.Errorf("duplicate representation %q", representation.ID)
+		}
 		representationByID[representation.ID] = representation
 	}
 	chunkByID := make(map[string]rag.Chunk, len(chunks))
