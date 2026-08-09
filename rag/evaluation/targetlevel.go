@@ -62,10 +62,8 @@ func ValidateJudgmentTarget(queryID string, existing []rag.Judgment, proposed Ta
 	if proposed == "" {
 		return errors.Errorf("judgment for query %q has no target level", queryID)
 	}
-	switch proposed {
-	case TargetRepresentation, TargetChunk, TargetDocument, TargetUnit:
-	default:
-		return errors.Errorf("unsupported relevance target %q", proposed)
+	if err := rag.Target(proposed).Validate(); err != nil {
+		return errors.Wrapf(err, "judgment for query %q has invalid target level", queryID)
 	}
 	level, judged, err := QueryTargetLevel(queryID, existing)
 	if err != nil {

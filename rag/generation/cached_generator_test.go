@@ -68,4 +68,22 @@ func TestCachedGeneratorRecoversBeforeZeroBudgetAdmission(t *testing.T) {
 	require.Equal(t, int64(1), provider.calls.Load())
 }
 
+func TestCachedGeneratorSnapshotOwnsUsagePointers(t *testing.T) {
+	provider := &cachedGeneratorCountingProvider{}
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	decorator, err := NewCachedGenerator(provider, CachedProviderOptions{
+		Cache: cache, Workers: 1, AdapterVersion: "adapter-v1", ContextPolicy: ContextPolicyNameForTest,
+	})
+	require.NoError(t, err)
+	_, err = decorator.Generate(t.Context(), rag.GenerationRequest{
+		Kind: "answer", Model: "model", Prompt: "prompt", Text: "question",
+	})
+	require.NoError(t, err)
+	report := decorator.Snapshot()
+	require.NotNil(t, report.Usage.OutputTokens)
+	*report.Usage.OutputTokens = 999
+	require.EqualValues(t, 3, *decorator.Snapshot().Usage.OutputTokens)
+}
+
 const ContextPolicyNameForTest = "whole-evidence-chunks-v1"

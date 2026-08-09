@@ -59,21 +59,24 @@ func writeBundle(
 }
 
 func testChunks() []rag.Chunk {
+	digestA0 := digest.Text("aaaaaaaaaaaa")
+	digestA1 := digest.Text("aabbbb")
+	digestB0 := digest.Text("ccc")
 	return []rag.Chunk{
 		{
 			ID: "chunk-a0", DocumentID: "doc-a", Ordinal: 0,
 			Range: rag.Range{ByteStart: 0, ByteEnd: 12}, Text: "aaaaaaaaaaaa",
-			ContentDigest: "d0", Chunker: "test",
+			ContentDigest: digestA0, Chunker: "test",
 		},
 		{
 			ID: "chunk-a1", DocumentID: "doc-a", Ordinal: 1,
 			Range: rag.Range{ByteStart: 10, ByteEnd: 16}, Text: "aabbbb",
-			ContentDigest: "d1", Chunker: "test",
+			ContentDigest: digestA1, Chunker: "test",
 		},
 		{
 			ID: "chunk-b0", DocumentID: "doc-b", Ordinal: 0,
 			Range: rag.Range{ByteStart: 0, ByteEnd: 3}, Text: "ccc",
-			ContentDigest: "d2", Chunker: "test",
+			ContentDigest: digestB0, Chunker: "test",
 		},
 	}
 }
@@ -243,6 +246,18 @@ func TestInspectRefusesAChunkCountThatContradictsTheManifest(t *testing.T) {
 	require.ErrorContains(t, err, "holds 3 chunks but its manifest counts 99")
 }
 
+func TestInspectRefusesAChunkWhoseTextContradictsItsDigest(t *testing.T) {
+	chunks := testChunks()
+	directory := writeBundle(t, Manifest{DocumentCount: 2}, chunks)
+	chunks[0].Text = "tampered text"
+	data, err := json.Marshal(chunks)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(directory, chunksName), data, 0o644))
+
+	_, err = Inspect(t.Context(), directory)
+	require.ErrorContains(t, err, "content digest")
+}
+
 // Inspect must open no index. This is the guard that makes the whole decision
 // worth taking: a reader that opens no index cannot corrupt one, and it cannot
 // fail for want of a provider it will never call.
@@ -286,10 +301,10 @@ func TestInspectOpensNeitherTheVectorStoreNorTheLexicalIndex(t *testing.T) {
 // neighbour produces a wrong overlap marker.
 func TestChunksOfReturnsOrdinalOrderWhateverTheFileOrderWas(t *testing.T) {
 	shuffled := []rag.Chunk{
-		{ID: "c2", DocumentID: "doc-a", Ordinal: 2, Text: "b"},
-		{ID: "c0", DocumentID: "doc-a", Ordinal: 0, Text: "a"},
-		{ID: "other", DocumentID: "doc-b", Ordinal: 0, Text: "z"},
-		{ID: "c1", DocumentID: "doc-a", Ordinal: 1, Text: "c"},
+		{ID: "c2", DocumentID: "doc-a", Ordinal: 2, Text: "b", ContentDigest: digest.Text("b")},
+		{ID: "c0", DocumentID: "doc-a", Ordinal: 0, Text: "a", ContentDigest: digest.Text("a")},
+		{ID: "other", DocumentID: "doc-b", Ordinal: 0, Text: "z", ContentDigest: digest.Text("z")},
+		{ID: "c1", DocumentID: "doc-a", Ordinal: 1, Text: "c", ContentDigest: digest.Text("c")},
 	}
 	directory := writeBundle(t, Manifest{DocumentCount: 2}, shuffled)
 	inspection, err := Inspect(t.Context(), directory)

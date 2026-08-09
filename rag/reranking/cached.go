@@ -97,6 +97,7 @@ func (r *CachedReranker) Snapshot() CachedReport {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	report := r.report
+	report.Usage = report.Usage.Clone()
 	report.Cache.Outcomes = append([]execution.CacheOutcome(nil), report.Cache.Outcomes...)
 	return report
 }

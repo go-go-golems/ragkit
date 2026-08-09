@@ -177,7 +177,10 @@ func TestCachedRerankerDecoratesSingleRequestInterface(t *testing.T) {
 	require.Equal(t, 1, report.Cache.WorkCalls)
 	require.Len(t, report.Cache.Outcomes, 2)
 	require.NotNil(t, report.Usage.CostUSD)
+	originalCost := *report.Usage.CostUSD
 
 	report.Cache.Outcomes[0].KeyDigest = "changed"
+	*report.Usage.CostUSD = 999
 	require.NotEqual(t, report.Cache.Outcomes[0].KeyDigest, decorator.Snapshot().Cache.Outcomes[0].KeyDigest)
+	require.Equal(t, originalCost, *decorator.Snapshot().Usage.CostUSD)
 }

@@ -138,28 +138,8 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 		len(representations) != manifest.RepresentationCount {
 		return bundleData{}, errors.New("bundle data counts differ from manifest")
 	}
-	documentIDs := make(map[string]struct{})
-	chunkByID := make(map[string]rag.Chunk, len(chunks))
-	for _, chunk := range chunks {
-		if chunk.ID == "" || chunk.DocumentID == "" || chunk.ContentDigest == "" {
-			return bundleData{}, errors.New("bundle contains an invalid chunk identity")
-		}
-		if digest.Text(chunk.Text) != chunk.ContentDigest {
-			return bundleData{}, errors.Errorf("bundle chunk %q content digest mismatch", chunk.ID)
-		}
-		if _, duplicate := chunkByID[chunk.ID]; duplicate {
-			return bundleData{}, errors.Errorf("bundle contains duplicate chunk %q", chunk.ID)
-		}
-		documentIDs[chunk.DocumentID] = struct{}{}
-		chunkByID[chunk.ID] = chunk
-	}
-	// Structural chunkers may intentionally emit no chunks for admitted
-	// documents that contain no indexable declarations. The manifest counts
-	// the complete source corpus, while the stored chunk data can therefore
-	// reference fewer documents. More chunk document IDs than source documents
-	// is always invalid.
-	if len(documentIDs) > manifest.DocumentCount {
-		return bundleData{}, errors.New("bundle chunk document count exceeds manifest corpus count")
+	if err := validateStoredChunks(chunks, manifest.DocumentCount); err != nil {
+		return bundleData{}, err
 	}
 	if err := rag.ValidateRepresentations(chunks, representations); err != nil {
 		return bundleData{}, errors.Wrap(err, "validate bundle representations")
@@ -199,6 +179,31 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 	// Markdown boundaries duplicate text. Persist the digest check through the
 	// manifest and bundle ID; callers validate source corpus when building.
 	return bundleData{chunks: chunks, representations: representations}, nil
+}
+
+func validateStoredChunks(chunks []rag.Chunk, documentCount int) error {
+	documentIDs := make(map[string]struct{})
+	chunkIDs := make(map[string]struct{}, len(chunks))
+	for _, chunk := range chunks {
+		if chunk.ID == "" || chunk.DocumentID == "" || chunk.ContentDigest == "" {
+			return errors.New("bundle contains an invalid chunk identity")
+		}
+		if digest.Text(chunk.Text) != chunk.ContentDigest {
+			return errors.Errorf("bundle chunk %q content digest mismatch", chunk.ID)
+		}
+		if _, duplicate := chunkIDs[chunk.ID]; duplicate {
+			return errors.Errorf("bundle contains duplicate chunk %q", chunk.ID)
+		}
+		chunkIDs[chunk.ID] = struct{}{}
+		documentIDs[chunk.DocumentID] = struct{}{}
+	}
+	// Structural chunkers may intentionally emit no chunks for admitted
+	// documents that contain no indexable declarations. More stored document
+	// identities than source documents is always invalid.
+	if len(documentIDs) > documentCount {
+		return errors.New("bundle chunk document count exceeds manifest corpus count")
+	}
+	return nil
 }
 
 func readJSON(path string, target any) error {

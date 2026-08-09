@@ -44,6 +44,9 @@ func EvaluateRankings(
 	if err := rag.ValidateQueries(queries); err != nil {
 		return Report{}, err
 	}
+	if err := validateCutoffs(cutoffs); err != nil {
+		return Report{}, err
+	}
 	report := Report{
 		PrecisionAt: make(map[int]float64, len(cutoffs)),
 		RecallAt:    make(map[int]float64, len(cutoffs)),
@@ -52,9 +55,6 @@ func EvaluateRankings(
 		PerQuery:    make([]RetrievalMetrics, 0, len(queries)),
 	}
 	for _, cutoff := range cutoffs {
-		if cutoff < 1 {
-			return Report{}, fmt.Errorf("cutoffs must be positive")
-		}
 		report.PrecisionAt[cutoff] = 0
 		report.RecallAt[cutoff] = 0
 		report.NDCGAt[cutoff] = 0
@@ -101,11 +101,20 @@ func EvaluateRankings(
 
 // Retrieval evaluates ordered target IDs against judgments.
 func Retrieval(query rag.Query, rankedTargetIDs []string, judgments []rag.Judgment, cutoffs []int) (RetrievalMetrics, error) {
+	if err := validateCutoffs(cutoffs); err != nil {
+		return RetrievalMetrics{}, err
+	}
 	relevant := map[string]float64{}
 	target := ""
 	for _, judgment := range judgments {
 		if judgment.QueryID != query.ID {
 			continue
+		}
+		if err := rag.Target(judgment.Target).Validate(); err != nil {
+			return RetrievalMetrics{}, fmt.Errorf("query %q judgment target: %w", query.ID, err)
+		}
+		if judgment.TargetID == "" {
+			return RetrievalMetrics{}, fmt.Errorf("query %q judgment target ID is required", query.ID)
 		}
 		if target == "" {
 			target = judgment.Target
@@ -134,9 +143,6 @@ func Retrieval(query rag.Query, rankedTargetIDs []string, judgments []rag.Judgme
 		MRR:         reciprocalRank(ids, relevant),
 	}
 	for _, cutoff := range cutoffs {
-		if cutoff < 1 {
-			return RetrievalMetrics{}, fmt.Errorf("cutoffs must be positive")
-		}
 		result.PrecisionAt[cutoff] = precision(ids, relevant, cutoff)
 		result.RecallAt[cutoff] = recall(ids, relevant, cutoff)
 		if result.RecallAt[cutoff] > 0 {
@@ -145,6 +151,20 @@ func Retrieval(query rag.Query, rankedTargetIDs []string, judgments []rag.Judgme
 		result.NDCGAt[cutoff] = ndcg(ids, relevant, cutoff)
 	}
 	return result, nil
+}
+
+func validateCutoffs(cutoffs []int) error {
+	seen := make(map[int]struct{}, len(cutoffs))
+	for _, cutoff := range cutoffs {
+		if cutoff < 1 {
+			return fmt.Errorf("cutoffs must be positive")
+		}
+		if _, exists := seen[cutoff]; exists {
+			return fmt.Errorf("duplicate retrieval cutoff %d", cutoff)
+		}
+		seen[cutoff] = struct{}{}
+	}
+	return nil
 }
 
 func unique(ids []string) []string {

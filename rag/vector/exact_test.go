@@ -60,6 +60,19 @@ func TestNewExactRejectsNonFiniteVectors(t *testing.T) {
 	}
 }
 
+func TestNewExactRejectsDuplicateRepresentationVectors(t *testing.T) {
+	t.Parallel()
+	chunks := []rag.Chunk{{ID: "chunk", DocumentID: "doc"}}
+	representations := []rag.Representation{{ID: "rep", ChunkID: "chunk"}}
+	vectors := []rag.Vector{
+		{RepresentationID: "rep", Model: "model", Values: []float32{1}},
+		{RepresentationID: "rep", Model: "model", Values: []float32{1}},
+	}
+	if _, err := NewExact("model", "vector", &embedding.HashEmbedder{Dimensions: 1}, representations, chunks, vectors); err == nil {
+		t.Fatal("NewExact() accepted duplicate representation vectors")
+	}
+}
+
 func TestExactSearchUsesChunkIDForEqualScores(t *testing.T) {
 	t.Parallel()
 	chunks := []rag.Chunk{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/execution"
 	"github.com/go-go-golems/ragkit/flow"
 	"github.com/go-go-golems/ragkit/rag"
@@ -91,6 +92,9 @@ func Cached(
 		}
 		if item.ContentDigest == "" {
 			return CachedResult{}, fmt.Errorf("embedding item %d: content digest is required", index)
+		}
+		if actual := digest.Text(item.Text); actual != item.ContentDigest {
+			return CachedResult{}, fmt.Errorf("embedding item %d: content digest mismatch: stored=%s actual=%s", index, item.ContentDigest, actual)
 		}
 	}
 

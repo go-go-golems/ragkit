@@ -122,6 +122,9 @@ func Inspect(ctx context.Context, path string) (*Inspection, error) {
 			len(chunks), manifest.ChunkCount,
 		)
 	}
+	if err := validateStoredChunks(chunks, manifest.DocumentCount); err != nil {
+		return nil, errors.Wrap(err, "validate bundle chunks")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

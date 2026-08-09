@@ -18,6 +18,15 @@ func (usage *Usage) Add(value Usage) {
 	usage.CostUSD = sumFloat64(usage.CostUSD, value.CostUSD)
 }
 
+// Clone returns a pointer-independent copy. Usage is value-shaped at API
+// boundaries, but its optional fields are pointers so a plain assignment does
+// not establish ownership.
+func (usage Usage) Clone() Usage {
+	var clone Usage
+	clone.Add(usage)
+	return clone
+}
+
 // UsageAccumulator aggregates provider usage safely across goroutines.
 type UsageAccumulator struct {
 	mutex sync.Mutex
@@ -41,9 +50,7 @@ func (accumulator *UsageAccumulator) Snapshot() Usage {
 	}
 	accumulator.mutex.Lock()
 	defer accumulator.mutex.Unlock()
-	var copy Usage
-	copy.Add(accumulator.usage)
-	return copy
+	return accumulator.usage.Clone()
 }
 
 func sumInt64(left, right *int64) *int64 {
