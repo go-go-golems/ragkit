@@ -154,6 +154,22 @@ func TestCachedRecoversAfterFinalItemFailure(t *testing.T) {
 	require.Zero(t, zero.Spent())
 }
 
+type failedUsageReranker struct{}
+
+func (failedUsageReranker) Rerank(context.Context, rag.RerankRequest) (rag.RerankResult, error) {
+	tokens := int64(8)
+	return rag.RerankResult{Usage: rag.Usage{InputTokens: &tokens}}, errors.New("provider failed")
+}
+
+func TestCachedReportsUsageFromFailedProviderCall(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	_, report, err := Cached(t.Context(), []rag.RerankRequest{rerankingRequest("one")}, cachedOptions(cache, nil), failedUsageReranker{})
+	require.Error(t, err)
+	require.NotNil(t, report.Usage.InputTokens)
+	require.Equal(t, int64(8), *report.Usage.InputTokens)
+}
+
 func TestCachedRerankerDecoratesSingleRequestInterface(t *testing.T) {
 	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
 	require.NoError(t, err)

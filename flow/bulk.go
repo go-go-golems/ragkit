@@ -68,6 +68,9 @@ func runBulk[I, O any](
 	if s.Name == "" {
 		return fail(fmt.Errorf("every step needs a name"))
 	}
+	if s.Meter != nil && s.AttemptMeter != nil {
+		return fail(fmt.Errorf("step %q cannot set both Meter and AttemptMeter", s.Name))
+	}
 	cached := s.Identity.Kind != "" && o.Store != nil
 	counts.Items = len(items)
 
@@ -250,6 +253,9 @@ func runBulk[I, O any](
 				return struct{}{}, fmt.Errorf("step %q: %w", s.Name, err)
 			}
 			lastClass = classifier.Classify(err)
+			if !lastClass.valid() {
+				return struct{}{}, fmt.Errorf("step %q: classifier returned unknown error class %d", s.Name, lastClass)
+			}
 			log.Debug().
 				Str("step", s.Name).
 				Int("attempt", attempt).

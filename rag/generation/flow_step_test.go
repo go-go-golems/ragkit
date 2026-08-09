@@ -19,6 +19,13 @@ type scriptedGenerator struct {
 	fail  error
 }
 
+type usageErrorGenerator struct{}
+
+func (usageErrorGenerator) Generate(context.Context, rag.GenerationRequest) (rag.GenerationResult, error) {
+	tokens := int64(4)
+	return rag.GenerationResult{Usage: rag.Usage{OutputTokens: &tokens}}, errors.New("provider failed")
+}
+
 func (generator *scriptedGenerator) Generate(_ context.Context, request rag.GenerationRequest) (rag.GenerationResult, error) {
 	generator.calls.Add(1)
 	if generator.fail != nil {
@@ -136,6 +143,14 @@ func TestUsageMetersRoundTripsReasoningTokens(t *testing.T) {
 	usage := UsageFromMeters(UsageMeters(rag.Usage{ReasoningTokens: &reasoningTokens}))
 	require.NotNil(t, usage.ReasoningTokens)
 	require.Equal(t, reasoningTokens, *usage.ReasoningTokens)
+}
+
+func TestFlowStepMetersUsageReturnedWithFailure(t *testing.T) {
+	step, err := FlowStep(usageErrorGenerator{}, "failed-generation", flow.Policy{}, "adapter-v1", "context-v1")
+	require.NoError(t, err)
+	_, report, err := flow.Run(t.Context(), step, []rag.GenerationRequest{flowStepRequest()}, flow.Options{})
+	require.Error(t, err)
+	require.Equal(t, flow.Meters{"output_tokens": 4}, report.Step("failed-generation").Meters)
 }
 
 func TestFlowStepValidatesOptionsLikeTheLegacyPath(t *testing.T) {

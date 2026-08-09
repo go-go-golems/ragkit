@@ -62,7 +62,12 @@ func Build(representations []rag.Representation, chunks []rag.Chunk, config Conf
 		documentFreq:    map[string]int{},
 	}
 	var totalLength int
+	representationIDs := make(map[string]struct{}, len(index.representations))
 	for _, representation := range index.representations {
+		if _, duplicate := representationIDs[representation.ID]; duplicate {
+			return nil, fmt.Errorf("duplicate representation ID %q", representation.ID)
+		}
+		representationIDs[representation.ID] = struct{}{}
 		if _, ok := chunkByID[representation.ChunkID]; !ok {
 			return nil, fmt.Errorf("representation %q references unknown chunk %q", representation.ID, representation.ChunkID)
 		}

@@ -676,6 +676,9 @@ func newTypedRunner[I, O any](s Step[I, O], o Options) (*typedRunner[I, O], erro
 	if s.Do == nil {
 		return nil, fmt.Errorf("step %q has no Do function", s.Name)
 	}
+	if s.Meter != nil && s.AttemptMeter != nil {
+		return nil, fmt.Errorf("step %q cannot set both Meter and AttemptMeter", s.Name)
+	}
 	classifier := s.Policy.Retry.Class
 	if classifier == nil {
 		classifier = DefaultClassifier
@@ -706,6 +709,9 @@ func newTypedRunner[I, O any](s Step[I, O], o Options) (*typedRunner[I, O], erro
 }
 
 func validatePolicy(step string, policy Policy) error {
+	if policy.Retry.Attempts < 0 {
+		return fmt.Errorf("step %q retry attempts must not be negative", step)
+	}
 	switch policy.OnError {
 	case FailFast, Quarantine, Skip:
 	default:
@@ -954,6 +960,12 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 		attemptsMade = attempt
 		value, err := runner.step.Do(ctx, item)
 		runner.count(func(counts *StepReport) { counts.WorkCalls++ })
+		if runner.step.AttemptMeter != nil {
+			metered := runner.step.AttemptMeter(value, err)
+			runner.mutex.Lock()
+			runner.meters.Add(metered)
+			runner.mutex.Unlock()
+		}
 		if err == nil {
 			return runner.success(ctx, index, value, key, digestValue)
 		}
@@ -962,6 +974,9 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 			return erasedItem{}, fmt.Errorf("step %q item %d: %w", runner.step.Name, index, err)
 		}
 		lastClass = runner.classifier.Classify(err)
+		if !lastClass.valid() {
+			return erasedItem{}, fmt.Errorf("step %q item %d: classifier returned unknown error class %d", runner.step.Name, index, lastClass)
+		}
 		log.Debug().
 			Str("step", runner.step.Name).
 			Int("item", index).

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCollapseAndRRF(t *testing.T) {
@@ -44,6 +45,13 @@ func TestWeightedRRFRejectsNonFiniteConfiguration(t *testing.T) {
 			t.Fatalf("WeightedRRF weight %v error = nil", weight)
 		}
 	}
+}
+
+func TestWeightedRRFRejectsNegativeWeight(t *testing.T) {
+	_, err := WeightedRRF(map[string][]rag.Hit{"lexical": {{ChunkID: "c", Rank: 1}}}, RRFConfig{
+		RankConstant: 60, Weights: map[string]float64{"lexical": -1},
+	})
+	require.ErrorContains(t, err, "non-negative")
 }
 
 func TestWeightedRRFUsesChunkIDAsFinalTieBreaker(t *testing.T) {

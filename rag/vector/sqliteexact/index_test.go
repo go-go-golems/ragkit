@@ -2,11 +2,18 @@ package sqliteexact
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
 )
+
+func TestDecodeRejectsOverflowingDimensions(t *testing.T) {
+	if _, err := decode([]byte{0, 0, 0, 0}, math.MaxInt); err == nil {
+		t.Fatal("decode accepted dimensions whose byte-size multiplication would overflow")
+	}
+}
 
 type fakeEmbedder struct {
 	vector []float32

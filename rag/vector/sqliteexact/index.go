@@ -420,7 +420,7 @@ func encode(values []float32) ([]byte, error) {
 }
 
 func decode(data []byte, dimensions int) ([]float32, error) {
-	if dimensions < 1 || len(data) != dimensions*4 {
+	if dimensions < 1 || len(data)%4 != 0 || dimensions != len(data)/4 {
 		return nil, errors.Errorf("invalid vector blob length %d for %d dimensions", len(data), dimensions)
 	}
 	values := make([]float32, dimensions)

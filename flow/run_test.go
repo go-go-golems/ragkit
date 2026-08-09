@@ -555,6 +555,36 @@ func TestRunMetersCountFreshWorkOnly(t *testing.T) {
 	require.Nil(t, report.Step("metered").Meters, "cache hits are not metered")
 }
 
+func TestRunAttemptMeterCountsFailedAttempts(t *testing.T) {
+	step := Step[int, int]{
+		Name: "failed-meter", Policy: Policy{Retry: RetrySpec{
+			Attempts: 2, Backoff: fastRetry(2).Backoff,
+			Class: ClassifierFunc(func(error) ErrorClass { return Transient }),
+		}},
+		Do:           func(context.Context, int) (int, error) { return 5, errors.New("provider failed") },
+		AttemptMeter: func(value int, _ error) Meters { return Meters{"tokens": float64(value)} },
+	}
+	_, report, err := Run(t.Context(), step, []int{1}, Options{})
+	require.Error(t, err)
+	require.Equal(t, Meters{"tokens": 10}, report.Step("failed-meter").Meters)
+}
+
+func TestRunRejectsNegativeRetryAttempts(t *testing.T) {
+	step := doubler("negative-retry", Policy{Retry: RetrySpec{Attempts: -1}})
+	_, _, err := Run(t.Context(), step, []int{1}, Options{})
+	require.ErrorContains(t, err, "retry attempts must not be negative")
+}
+
+func TestRunRejectsUnknownClassifierResult(t *testing.T) {
+	step := Step[int, int]{
+		Name:   "bad-classifier",
+		Policy: Policy{Retry: RetrySpec{Attempts: 1, Class: ClassifierFunc(func(error) ErrorClass { return ErrorClass(99) })}},
+		Do:     func(context.Context, int) (int, error) { return 0, errors.New("failed") },
+	}
+	_, _, err := Run(t.Context(), step, []int{1}, Options{})
+	require.ErrorContains(t, err, "unknown error class 99")
+}
+
 func TestRunReportsSpendSnapshots(t *testing.T) {
 	step := doubler("spender", Policy{
 		Admission: []Resource{{Name: "spender-calls", Ceiling: 2, Budget: 5}},

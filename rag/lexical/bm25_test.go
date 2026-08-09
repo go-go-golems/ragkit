@@ -41,6 +41,14 @@ func TestBM25RejectsNonFiniteParameters(t *testing.T) {
 	}
 }
 
+func TestBM25RejectsDuplicateRepresentationIDs(t *testing.T) {
+	chunks := []rag.Chunk{{ID: "a", DocumentID: "doc", Text: "oak"}, {ID: "b", DocumentID: "doc", Text: "pine"}}
+	representations := []rag.Representation{{ID: "duplicate", ChunkID: "a", Text: "oak"}, {ID: "duplicate", ChunkID: "b", Text: "pine"}}
+	if _, err := Build(representations, chunks, Config{}); err == nil {
+		t.Fatal("Build() accepted duplicate representation IDs")
+	}
+}
+
 func TestBM25PreservesExplicitZeroB(t *testing.T) {
 	t.Parallel()
 	zero := 0.0

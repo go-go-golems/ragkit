@@ -149,10 +149,10 @@ func Cached(
 		},
 		func(ctx context.Context, request rag.RerankRequest) (cacheEnvelope, error) {
 			result, err := reranker.Rerank(ctx, request)
+			usage.Add(result.Usage)
 			if err != nil {
 				return cacheEnvelope{}, err
 			}
-			usage.Add(result.Usage)
 			return cacheEnvelope{Result: result}, nil
 		},
 	)

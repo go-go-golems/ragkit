@@ -94,6 +94,14 @@ func TestBulkUncachedResultsEmitDone(t *testing.T) {
 	require.Empty(t, ledger.byType(EventStored))
 }
 
+func TestBulkRejectsUnknownClassifierResult(t *testing.T) {
+	base := bulkStep("bad-classifier")
+	base.Policy.Retry = RetrySpec{Attempts: 1, Class: ClassifierFunc(func(error) ErrorClass { return ErrorClass(99) })}
+	step := Bulk(base, func(context.Context, []int) ([]int, error) { return nil, errors.New("failed") }, 2)
+	_, _, err := Run(t.Context(), step, []int{1}, Options{})
+	require.ErrorContains(t, err, "unknown error class 99")
+}
+
 func TestBulkDeduplicatesKeysAndChargesUniqueMisses(t *testing.T) {
 	budget := Resource{Name: "embed-items", Ceiling: 2, Budget: 2}
 	base := bulkStep("dedup-bulk")

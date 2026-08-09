@@ -23,6 +23,8 @@ const (
 	Fatal
 )
 
+func (class ErrorClass) valid() bool { return class >= Transient && class <= Fatal }
+
 // String names the class for reports and logs.
 func (class ErrorClass) String() string {
 	switch class {

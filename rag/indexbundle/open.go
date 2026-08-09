@@ -184,6 +184,7 @@ func loadData(path string, manifest Manifest) (bundleData, error) {
 func validateStoredChunks(chunks []rag.Chunk, documentCount int) error {
 	documentIDs := make(map[string]struct{})
 	chunkIDs := make(map[string]struct{}, len(chunks))
+	ordinals := make(map[string]map[int]struct{}, documentCount)
 	for _, chunk := range chunks {
 		if chunk.ID == "" || chunk.DocumentID == "" || chunk.ContentDigest == "" {
 			return errors.New("bundle contains an invalid chunk identity")
@@ -198,6 +199,16 @@ func validateStoredChunks(chunks []rag.Chunk, documentCount int) error {
 		if _, duplicate := chunkIDs[chunk.ID]; duplicate {
 			return errors.Errorf("bundle contains duplicate chunk %q", chunk.ID)
 		}
+		if chunk.Ordinal < 0 {
+			return errors.Errorf("bundle chunk %q has negative ordinal %d", chunk.ID, chunk.Ordinal)
+		}
+		if ordinals[chunk.DocumentID] == nil {
+			ordinals[chunk.DocumentID] = map[int]struct{}{}
+		}
+		if _, duplicate := ordinals[chunk.DocumentID][chunk.Ordinal]; duplicate {
+			return errors.Errorf("bundle contains duplicate ordinal %d for document %q", chunk.Ordinal, chunk.DocumentID)
+		}
+		ordinals[chunk.DocumentID][chunk.Ordinal] = struct{}{}
 		chunkIDs[chunk.ID] = struct{}{}
 		documentIDs[chunk.DocumentID] = struct{}{}
 	}

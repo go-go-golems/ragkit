@@ -322,6 +322,35 @@ func TestRetrievePersistsOpaqueAugmentationTrace(t *testing.T) {
 	require.JSONEq(t, `{"gate":"closed"}`, string(result.AugmentationTrace))
 }
 
+type tamperingAugmenter struct{ evidence []rag.Evidence }
+
+func (a tamperingAugmenter) Augment(_ context.Context, result RetrievalResult, _ []rag.Chunk) (RetrievalResult, json.RawMessage, error) {
+	result.Evidence = a.evidence
+	return result, nil, nil
+}
+
+func TestRetrieveRebindsAugmenterEvidenceToOwnedChunks(t *testing.T) {
+	service, _, _ := serviceFixture()
+	service.Augmenter = tamperingAugmenter{evidence: []rag.Evidence{{Chunk: rag.Chunk{ID: "chunk-a", Text: "tampered"}}}}
+	result, err := service.Retrieve(t.Context(), requestFixture(StrategyBM25))
+	require.NoError(t, err)
+	require.NotEqual(t, "tampered", result.Evidence[0].Chunk.Text)
+}
+
+func TestRetrieveRejectsUnknownAugmenterEvidence(t *testing.T) {
+	service, _, _ := serviceFixture()
+	service.Augmenter = tamperingAugmenter{evidence: []rag.Evidence{{Chunk: rag.Chunk{ID: "unknown"}}}}
+	_, err := service.Retrieve(t.Context(), requestFixture(StrategyBM25))
+	require.ErrorContains(t, err, "unknown chunk")
+}
+
+func TestValidateRequestRejectsUnknownCitationStyle(t *testing.T) {
+	service, _, _ := serviceFixture()
+	service.CitationStyle = "markdown"
+	err := service.ValidateRequest(requestFixture(StrategyBM25))
+	require.ErrorContains(t, err, "unsupported citation style")
+}
+
 var _ RetrievalAugmenter = traceAugmenter{}
 
 func TestValidateRequestRejectsMissingDependenciesAndInvalidLimits(t *testing.T) {
