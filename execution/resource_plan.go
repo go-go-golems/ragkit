@@ -56,15 +56,15 @@ func ValidateResourcePlans(
 				plan.Ceiling,
 			)
 		}
+		if plan.UnitUSD != nil && (math.IsNaN(*plan.UnitUSD) || math.IsInf(*plan.UnitUSD, 0) || *plan.UnitUSD < 0) {
+			return preflight, fmt.Errorf("resource %q unit price must be finite and non-negative", plan.Name)
+		}
 		if plan.Ceiling == 0 {
 			continue
 		}
 		if plan.UnitUSD == nil {
 			preflight.MissingPrices = append(preflight.MissingPrices, plan.Name)
 			continue
-		}
-		if math.IsNaN(*plan.UnitUSD) || math.IsInf(*plan.UnitUSD, 0) || *plan.UnitUSD < 0 {
-			return preflight, fmt.Errorf("resource %q unit price must be finite and non-negative", plan.Name)
 		}
 		preflight.EstimatedUSD += float64(plan.Ceiling) * *plan.UnitUSD
 	}

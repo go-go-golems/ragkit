@@ -191,11 +191,11 @@ func (s *Service) Answer(ctx context.Context, request Request) (Result, error) {
 			Failures:        []string{err.Error()},
 		}
 		_ = state.emit(context.WithoutCancel(ctx), StageGeneration, ObservationFailed, stageStarted, time.Since(stageStarted), contract, err.Error())
-		return Result{Prepared: prepared, Contract: contract, StartedAt: started.UTC(), Duration: time.Since(started)},
+		return Result{Prepared: prepared, Raw: raw, Contract: contract, StartedAt: started.UTC(), Duration: time.Since(started)},
 			errors.Wrap(err, "generate grounded answer")
 	}
 	if err := state.emit(ctx, StageGeneration, ObservationCompleted, stageStarted, time.Since(stageStarted), raw, ""); err != nil {
-		return Result{}, err
+		return Result{Prepared: prepared, Raw: raw, StartedAt: started.UTC(), Duration: time.Since(started)}, err
 	}
 	result, err := s.interpret(ctx, prepared, raw, &state)
 	result.StartedAt = started.UTC()
@@ -445,11 +445,11 @@ func (s *Service) interpret(ctx context.Context, prepared Prepared, raw rag.Gene
 	if err := state.emit(ctx, StageContract, ObservationStarted, started, 0, nil, ""); err != nil {
 		return Result{}, err
 	}
-	if prepared.CitationStyle == CitationStyleOrdinal {
-		if err := validateCitationLabels(prepared); err != nil {
-			return Result{}, err
-		}
+	validatedPrepared, err := s.validateStagedPrepared(prepared)
+	if err != nil {
+		return Result{}, err
 	}
+	prepared = validatedPrepared
 	answer, contract := ParseGroundedAnswer(raw.Text, prepared.Context.Evidence)
 	if contract.Valid && prepared.CitationStyle == CitationStyleOrdinal {
 		for index, label := range answer.CitationChunkIDs {
@@ -600,7 +600,7 @@ func (s *Service) generateVariants(
 		return nil, message, raw.Usage, nil
 	}
 	variants := make([]string, 0, count)
-	seen := map[string]bool{query.Text: true}
+	seen := map[string]bool{strings.TrimSpace(query.Text): true}
 	for _, variant := range parsed.Variants {
 		variant = strings.TrimSpace(variant)
 		if variant == "" || seen[variant] {
@@ -698,6 +698,50 @@ func validateEvidenceScores(role string, index int, item rag.Evidence) error {
 	return nil
 }
 
+func (s *Service) validateStagedPrepared(prepared Prepared) (Prepared, error) {
+	if prepared.CitationStyle == CitationStyleOrdinal {
+		if err := validateCitationLabels(prepared); err != nil {
+			return Prepared{}, err
+		}
+	}
+	byID := make(map[string]rag.Chunk, len(s.Chunks))
+	for _, chunk := range s.Chunks {
+		if _, exists := byID[chunk.ID]; exists {
+			return Prepared{}, errors.Errorf("service has duplicate chunk %q", chunk.ID)
+		}
+		byID[chunk.ID] = chunk
+	}
+	validated := append([]rag.Evidence(nil), prepared.Context.Evidence...)
+	seen := make(map[string]struct{}, len(validated))
+	for index := range validated {
+		id := validated[index].Chunk.ID
+		if prepared.CitationStyle == CitationStyleOrdinal {
+			var ok bool
+			id, ok = prepared.CitationLabels[id]
+			if !ok {
+				return Prepared{}, errors.Errorf("citation label %q has no immutable chunk mapping", validated[index].Chunk.ID)
+			}
+		}
+		chunk, ok := byID[id]
+		if !ok {
+			return Prepared{}, errors.Errorf("staged context evidence %d references unknown service chunk %q", index, id)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return Prepared{}, errors.Errorf("staged context duplicates service chunk %q", id)
+		}
+		seen[id] = struct{}{}
+		validated[index].Chunk = chunk
+		if prepared.CitationStyle == CitationStyleOrdinal {
+			validated[index].Chunk.ID = fmt.Sprintf("E%d", index+1)
+			if prepared.CitationLabels[validated[index].Chunk.ID] != id {
+				return Prepared{}, errors.Errorf("citation label %q maps to unauthorized chunk %q", validated[index].Chunk.ID, id)
+			}
+		}
+	}
+	prepared.Context.Evidence = validated
+	return prepared, nil
+}
+
 func validateCitationLabels(prepared Prepared) error {
 	authorized := ApplyContextPolicy(
 		prepared.Retrieval.Evidence,
@@ -707,20 +751,11 @@ func validateCitationLabels(prepared Prepared) error {
 	if len(prepared.CitationLabels) != len(authorized) {
 		return errors.Errorf("citation label mapping has %d entries, want %d", len(prepared.CitationLabels), len(authorized))
 	}
-	seen := make(map[string]struct{}, len(authorized))
 	for index, evidence := range authorized {
 		label := fmt.Sprintf("E%d", index+1)
-		chunkID, ok := prepared.CitationLabels[label]
-		if !ok {
-			return errors.Errorf("citation label mapping is missing %q", label)
-		}
-		if chunkID != evidence.Chunk.ID {
+		if chunkID := prepared.CitationLabels[label]; chunkID != evidence.Chunk.ID {
 			return errors.Errorf("citation label %q maps to unauthorized chunk %q", label, chunkID)
 		}
-		if _, duplicate := seen[chunkID]; duplicate {
-			return errors.Errorf("citation label mapping duplicates chunk %q", chunkID)
-		}
-		seen[chunkID] = struct{}{}
 	}
 	return nil
 }

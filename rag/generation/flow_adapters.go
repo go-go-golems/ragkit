@@ -2,6 +2,7 @@ package generation
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 
@@ -128,6 +129,14 @@ func (batcher *FlowBatcher) generate(ctx context.Context, requests []rag.Generat
 	batcher.mutex.Unlock()
 	if err != nil {
 		return nil, freshUsage, err
+	}
+	for index, result := range results {
+		if result.Quarantined != nil {
+			return nil, freshUsage, fmt.Errorf("generation item %d quarantined: %s", index, result.Quarantined.Message)
+		}
+		if result.Skipped {
+			return nil, freshUsage, fmt.Errorf("generation item %d skipped by flow policy", index)
+		}
 	}
 	return Unwrap(results), freshUsage, nil
 }

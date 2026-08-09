@@ -59,6 +59,9 @@ func LoadEvaluation(path string) (EvaluationInput, error) {
 			return EvaluationInput{}, errors.Errorf("judgment %d refers to unknown query %q", index, judgment.QueryID)
 		}
 	}
+	if err := rag.ValidateJudgments(set.Judgments); err != nil {
+		return EvaluationInput{}, errors.Wrap(err, "validate evaluation judgments")
+	}
 	return EvaluationInput{
 		CorpusDigest: set.CorpusDigest, Queries: set.Queries, Judgments: set.Judgments,
 	}, nil

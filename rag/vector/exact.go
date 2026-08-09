@@ -45,6 +45,9 @@ func NewExact(
 	}
 	chunkByID := make(map[string]rag.Chunk, len(chunks))
 	for _, chunk := range chunks {
+		if _, exists := chunkByID[chunk.ID]; exists {
+			return nil, fmt.Errorf("duplicate chunk %q", chunk.ID)
+		}
 		chunkByID[chunk.ID] = chunk
 	}
 	dimensions := 0

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
 )
 
@@ -12,12 +13,18 @@ import (
 func Raw(chunks []rag.Chunk) []rag.Representation {
 	result := make([]rag.Representation, len(chunks))
 	for index, chunk := range chunks {
+		contentDigest := chunk.ContentDigest
+		if contentDigest == "" {
+			contentDigest = digest.Text(chunk.Text)
+		}
+		identity, _ := digest.JSON(struct {
+			ChunkID       string `json:"chunk_id"`
+			ContentDigest string `json:"content_digest"`
+			Kind          string `json:"kind"`
+		}{ChunkID: chunk.ID, ContentDigest: contentDigest, Kind: "raw"})
 		result[index] = rag.Representation{
-			ID:            "rep-raw-" + chunk.ID,
-			ChunkID:       chunk.ID,
-			Kind:          "raw",
-			Text:          chunk.Text,
-			ContentDigest: chunk.ContentDigest,
+			ID: "rep-" + identity[:16], ChunkID: chunk.ID, Kind: "raw",
+			Text: chunk.Text, ContentDigest: contentDigest,
 		}
 	}
 	return result
