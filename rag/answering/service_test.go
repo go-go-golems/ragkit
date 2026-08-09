@@ -201,6 +201,10 @@ func TestRerankedStrategyValidatesIdentitiesAndRehydratesSourceEvidence(t *testi
 		"too few":   {{Chunk: rag.Chunk{ID: "chunk-c"}}},
 		"duplicate": {{Chunk: rag.Chunk{ID: "chunk-c"}}, {Chunk: rag.Chunk{ID: "chunk-c"}}},
 		"unknown":   {{Chunk: rag.Chunk{ID: "chunk-c"}}, {Chunk: rag.Chunk{ID: "injected"}}},
+		"non-finite score": {
+			{Chunk: rag.Chunk{ID: "chunk-c"}, RerankerScore: float64Pointer(math.NaN())},
+			{Chunk: rag.Chunk{ID: "chunk-b"}},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			service.Reranker = fixedReranker{evidence: returned}
@@ -322,7 +326,13 @@ func TestValidateRequestRejectsMissingDependenciesAndInvalidLimits(t *testing.T)
 
 	request = requestFixture(StrategyRRFReranked)
 	require.ErrorContains(t, service.ValidateRequest(request), "reranker")
+
+	request = requestFixture(StrategyBM25)
+	request.Config.QueryVariants = -1
+	require.ErrorContains(t, service.ValidateRequest(request), "query variants")
 }
+
+func float64Pointer(value float64) *float64 { return &value }
 
 func TestCancellationStopsAtSearch(t *testing.T) {
 	service, _, _ := serviceFixture()
