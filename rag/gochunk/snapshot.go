@@ -70,6 +70,24 @@ func LoadCommitted(ctx context.Context, manifestPath string, policy Policy) (Loa
 	if len(manifest.Repositories) == 0 {
 		return LoadResult{}, errors.New("workspace manifest has no repositories")
 	}
+	names := make(map[string]struct{}, len(manifest.Repositories))
+	worktrees := make(map[string]struct{}, len(manifest.Repositories))
+	for _, repository := range manifest.Repositories {
+		name := strings.TrimSpace(repository.Name)
+		worktree := strings.TrimSpace(repository.WorktreePath)
+		if name == "" || worktree == "" {
+			return LoadResult{}, errors.New("workspace repository requires name and worktreePath")
+		}
+		if _, exists := names[name]; exists {
+			return LoadResult{}, errors.Errorf("workspace repository name %q is duplicated", name)
+		}
+		names[name] = struct{}{}
+		worktree = filepath.Clean(worktree)
+		if _, exists := worktrees[worktree]; exists {
+			return LoadResult{}, errors.Errorf("workspace repository worktree %q is duplicated", worktree)
+		}
+		worktrees[worktree] = struct{}{}
+	}
 	result := LoadResult{Snapshot: Snapshot{WorkspacePath: manifest.Path}}
 	for _, repository := range manifest.Repositories {
 		if err := ctx.Err(); err != nil {

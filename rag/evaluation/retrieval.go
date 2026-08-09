@@ -44,6 +44,9 @@ func EvaluateRankings(
 	if err := rag.ValidateQueries(queries); err != nil {
 		return Report{}, err
 	}
+	if err := rag.ValidateJudgments(judgments); err != nil {
+		return Report{}, err
+	}
 	if err := validateCutoffs(cutoffs); err != nil {
 		return Report{}, err
 	}

@@ -761,6 +761,9 @@ func validatePolicy(step string, policy Policy) error {
 	if policy.Retry.Attempts < 0 {
 		return fmt.Errorf("step %q retry attempts must not be negative", step)
 	}
+	if policy.Retry.Backoff.Base < 0 || policy.Retry.Backoff.Cap < 0 {
+		return fmt.Errorf("step %q retry backoff durations must not be negative", step)
+	}
 	switch policy.OnError {
 	case FailFast, Quarantine, Skip:
 	default:

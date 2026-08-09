@@ -186,3 +186,35 @@ func ValidateQueries(queries []Query) error {
 	}
 	return nil
 }
+
+// ValidateJudgments checks the reusable evaluation-data invariants before
+// retrieval work can make a malformed label set appear as a metric result.
+func ValidateJudgments(judgments []Judgment) error {
+	seen := make(map[string]struct{}, len(judgments))
+	targetByQuery := make(map[string]Target, len(judgments))
+	for index, judgment := range judgments {
+		if strings.TrimSpace(judgment.QueryID) == "" {
+			return fmt.Errorf("judgment %d has no query ID", index)
+		}
+		if err := Target(judgment.Target).Validate(); err != nil {
+			return fmt.Errorf("judgment %d: %w", index, err)
+		}
+		if strings.TrimSpace(judgment.TargetID) == "" {
+			return fmt.Errorf("judgment %d has no target ID", index)
+		}
+		if math.IsNaN(judgment.Grade) || math.IsInf(judgment.Grade, 0) || judgment.Grade < 0 {
+			return fmt.Errorf("judgment %d has invalid relevance grade %v", index, judgment.Grade)
+		}
+		target := Target(judgment.Target)
+		if existing, ok := targetByQuery[judgment.QueryID]; ok && existing != target {
+			return fmt.Errorf("query %q mixes relevance targets", judgment.QueryID)
+		}
+		targetByQuery[judgment.QueryID] = target
+		key := judgment.QueryID + "\x00" + judgment.Target + "\x00" + judgment.TargetID
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("duplicate %s judgment for query %q target %q", judgment.Target, judgment.QueryID, judgment.TargetID)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}

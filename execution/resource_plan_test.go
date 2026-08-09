@@ -59,6 +59,8 @@ func TestValidateResourcePlansRejectsInvalidPlans(t *testing.T) {
 		{name: "negative price", plans: []ResourcePlan{{Name: "x", Ceiling: 1, Budget: 1, UnitUSD: &price}}},
 		{name: "NaN price", plans: []ResourcePlan{{Name: "x", Ceiling: 1, Budget: 1, UnitUSD: &nan}}},
 		{name: "infinite price", plans: []ResourcePlan{{Name: "x", Ceiling: 1, Budget: 1, UnitUSD: &infinity}}},
+		{name: "negative zero-ceiling price", plans: []ResourcePlan{{Name: "x", UnitUSD: &price}}},
+		{name: "NaN zero-ceiling price", plans: []ResourcePlan{{Name: "x", UnitUSD: &nan}}},
 	}
 	for _, test := range tests {
 		test := test

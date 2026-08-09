@@ -76,3 +76,17 @@ func TestValidateCorpusRejectsInvalidOrdinals(t *testing.T) {
 	require.ErrorContains(t, ValidateCorpus([]Document{document}, []Chunk{chunk("negative", -1, 0)}), "negative ordinal")
 	require.ErrorContains(t, ValidateCorpus([]Document{document}, []Chunk{chunk("a", 0, 0), chunk("b", 0, 1)}), "duplicates ordinal")
 }
+
+func TestValidateJudgmentsRejectsInvalidAndAmbiguousLabels(t *testing.T) {
+	valid := []Judgment{{QueryID: "q", Target: string(TargetChunk), TargetID: "chunk", Grade: 1}}
+	require.NoError(t, ValidateJudgments(valid))
+	for name, judgments := range map[string][]Judgment{
+		"negative grade":    {{QueryID: "q", Target: string(TargetChunk), TargetID: "chunk", Grade: -1}},
+		"missing target":    {{QueryID: "q", Target: "", TargetID: "chunk", Grade: 1}},
+		"missing target ID": {{QueryID: "q", Target: string(TargetChunk), Grade: 1}},
+		"duplicate":         {valid[0], valid[0]},
+		"mixed targets":     {valid[0], {QueryID: "q", Target: string(TargetDocument), TargetID: "doc", Grade: 1}},
+	} {
+		t.Run(name, func(t *testing.T) { require.Error(t, ValidateJudgments(judgments)) })
+	}
+}
