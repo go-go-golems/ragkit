@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/execution"
 	"github.com/go-go-golems/ragkit/flow"
 	"github.com/go-go-golems/ragkit/rag"
@@ -20,9 +21,9 @@ func TestCachedPreservesOrderDeduplicatesAndAccountsForMisses(t *testing.T) {
 	cache := newTestCache(t)
 	embedder := &recordingEmbedder{}
 	items := []Item{
-		{ID: "b", Text: "two", ContentDigest: "digest-b"},
-		{ID: "a", Text: "one", ContentDigest: "digest-a"},
-		{ID: "b", Text: "two", ContentDigest: "digest-b"},
+		{ID: "b", Text: "two", ContentDigest: digest.Text("two")},
+		{ID: "a", Text: "one", ContentDigest: digest.Text("one")},
+		{ID: "b", Text: "two", ContentDigest: digest.Text("two")},
 	}
 	result, err := Cached(context.Background(), embedder, items, cachedTestOptions(cache, nil))
 	require.NoError(t, err)
@@ -40,6 +41,14 @@ func TestCachedPreservesOrderDeduplicatesAndAccountsForMisses(t *testing.T) {
 	require.Equal(t, 0, replay.Cache.WorkCalls)
 	require.Equal(t, rag.Usage{}, replay.Usage)
 	require.Equal(t, 1, embedder.callCount())
+}
+
+func TestCachedRejectsStaleContentDigest(t *testing.T) {
+	t.Parallel()
+	_, err := Cached(context.Background(), &recordingEmbedder{}, []Item{{
+		ID: "item", Text: "current text", ContentDigest: digest.Text("old text"),
+	}}, cachedTestOptions(newTestCache(t), nil))
+	require.ErrorContains(t, err, "content digest")
 }
 
 func TestCachedRecoversCompletedBatchesAndReplaysAtZeroBudget(t *testing.T) {
@@ -254,10 +263,11 @@ func budgetedTestOptions(cache execution.Cache, budget int) (CachedOptions, flow
 func testItems(count int) []Item {
 	items := make([]Item, count)
 	for index := range items {
+		text := fmt.Sprintf("text-%d", index)
 		items[index] = Item{
 			ID:            fmt.Sprintf("item-%d", index),
-			Text:          fmt.Sprintf("text-%d", index),
-			ContentDigest: fmt.Sprintf("digest-%d", index),
+			Text:          text,
+			ContentDigest: digest.Text(text),
 		}
 	}
 	return items

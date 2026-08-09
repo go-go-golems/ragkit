@@ -117,6 +117,32 @@ func TestRetrievalRejectsDuplicateJudgments(t *testing.T) {
 	}
 }
 
+func TestRetrievalRejectsInvalidJudgmentIdentity(t *testing.T) {
+	t.Parallel()
+	tests := []rag.Judgment{
+		{QueryID: "q", Target: "", TargetID: "target", Grade: 1},
+		{QueryID: "q", Target: "unsupported", TargetID: "target", Grade: 1},
+		{QueryID: "q", Target: "document", TargetID: "", Grade: 1},
+	}
+	for _, judgment := range tests {
+		if _, err := Retrieval(rag.Query{ID: "q"}, nil, []rag.Judgment{judgment}, []int{1}); err == nil {
+			t.Fatalf("Retrieval() accepted judgment %+v", judgment)
+		}
+	}
+}
+
+func TestRetrievalRejectsDuplicateCutoffs(t *testing.T) {
+	t.Parallel()
+	_, err := Retrieval(
+		rag.Query{ID: "q"}, []string{"target"},
+		[]rag.Judgment{{QueryID: "q", Target: "document", TargetID: "target", Grade: 1}},
+		[]int{1, 1},
+	)
+	if err == nil {
+		t.Fatal("Retrieval() accepted duplicate cutoffs")
+	}
+}
+
 func TestEvaluateRankingsRejectsDuplicateQueryIDs(t *testing.T) {
 	t.Parallel()
 	_, err := EvaluateRankings([]rag.Query{{ID: "q"}, {ID: "q"}}, nil, nil, []int{1})

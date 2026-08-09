@@ -37,6 +37,18 @@ func TestUsageAddDoesNotAliasInputs(t *testing.T) {
 	require.Equal(t, int64(9), input)
 }
 
+func TestUsageCloneDoesNotAliasPointers(t *testing.T) {
+	t.Parallel()
+	input := int64(2)
+	cost := 0.5
+	original := Usage{InputTokens: &input, CostUSD: &cost}
+	clone := original.Clone()
+	*clone.InputTokens = 9
+	*clone.CostUSD = 1.5
+	require.Equal(t, int64(2), *original.InputTokens)
+	require.Equal(t, 0.5, *original.CostUSD)
+}
+
 func TestUsageAccumulatorSnapshotDoesNotChange(t *testing.T) {
 	t.Parallel()
 	var accumulator UsageAccumulator

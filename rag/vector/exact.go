@@ -45,7 +45,12 @@ func NewExact(
 		chunkByID[chunk.ID] = chunk
 	}
 	dimensions := 0
+	vectorIDs := make(map[string]struct{}, len(vectors))
 	for _, vector := range vectors {
+		if _, exists := vectorIDs[vector.RepresentationID]; exists {
+			return nil, fmt.Errorf("duplicate vector for representation %q", vector.RepresentationID)
+		}
+		vectorIDs[vector.RepresentationID] = struct{}{}
 		if vector.Model != model {
 			return nil, fmt.Errorf("vector %q model %q does not match index model %q", vector.RepresentationID, vector.Model, model)
 		}

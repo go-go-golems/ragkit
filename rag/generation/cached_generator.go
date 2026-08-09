@@ -86,6 +86,7 @@ func (g *CachedGenerator) Snapshot() CachedProviderReport {
 	g.mutex.Lock()
 	defer g.mutex.Unlock()
 	report := g.report
+	report.Usage = report.Usage.Clone()
 	report.Cache.Outcomes = append(
 		[]execution.CacheOutcome(nil), report.Cache.Outcomes...,
 	)
