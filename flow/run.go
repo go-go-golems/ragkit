@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +105,11 @@ func (o Options) Cost() execution.CostPreflight {
 type stagePlan struct {
 	step     string
 	resource Resource
+}
+
+type policySpec struct {
+	step   string
+	policy Policy
 }
 
 // runEnv owns one budget and composed limiter per resource name for a whole
@@ -325,6 +331,16 @@ func (env *runEnv) snapshot(names []string) map[string]execution.BudgetSnapshot 
 // and is returned best-effort alongside errors.
 func Run[I, O any](ctx context.Context, s Step[I, O], items []I, o Options) ([]Result[O], Report, error) {
 	stages := stagesOf(s)
+	for _, stage := range stages {
+		if err := validatePolicy(stage.name, stage.policy); err != nil {
+			return nil, Report{}, err
+		}
+		for _, nested := range stage.extraPolicies {
+			if err := validatePolicy(nested.step, nested.policy); err != nil {
+				return nil, Report{}, err
+			}
+		}
+	}
 	if o.env == nil {
 		o.env = newRunEnv(o.Rates, o.Preflight)
 	}
@@ -390,10 +406,12 @@ func (item erasedItem) flagged() bool { return item.quarantined != nil || item.s
 // stageSpec is one pipeline stage: its identity for reports, its admission
 // plans for the shared preflight, and a builder for its runner.
 type stageSpec struct {
-	name    string
-	barrier bool
-	plans   []stagePlan
-	build   func(o Options) (stageRunner, error)
+	name          string
+	barrier       bool
+	policy        Policy
+	extraPolicies []policySpec
+	plans         []stagePlan
+	build         func(o Options) (stageRunner, error)
 }
 
 // stageRunner processes a stream of erased items. run must not close the
@@ -420,18 +438,22 @@ func stageOfStep[I, O any](s Step[I, O]) stageSpec {
 	plans = append(plans, s.extraPlans...)
 	if s.override != nil {
 		return stageSpec{
-			name:    s.Name,
-			barrier: true,
-			plans:   plans,
+			name:          s.Name,
+			barrier:       true,
+			policy:        s.Policy,
+			extraPolicies: s.extraPolicies,
+			plans:         plans,
 			build: func(o Options) (stageRunner, error) {
 				return &overrideStageRunner[I, O]{step: s, options: o}, nil
 			},
 		}
 	}
 	return stageSpec{
-		name:    s.Name,
-		barrier: s.Barrier,
-		plans:   plans,
+		name:          s.Name,
+		barrier:       s.Barrier,
+		policy:        s.Policy,
+		extraPolicies: s.extraPolicies,
+		plans:         plans,
 		build: func(o Options) (stageRunner, error) {
 			return newTypedRunner(s, o)
 		},
@@ -558,6 +580,7 @@ func (runner *overrideStageRunner[I, O]) run(ctx context.Context, in <-chan eras
 		}
 		clean = append(clean, item)
 	}
+	sort.Slice(clean, func(left, right int) bool { return clean[left].index < clean[right].index })
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -680,6 +703,23 @@ func newTypedRunner[I, O any](s Step[I, O], o Options) (*typedRunner[I, O], erro
 		meters:     Meters{},
 		inflight:   map[string]*inflightCall{},
 	}, nil
+}
+
+func validatePolicy(step string, policy Policy) error {
+	switch policy.OnError {
+	case FailFast, Quarantine, Skip:
+	default:
+		return fmt.Errorf("step %q has unknown failure mode %d", step, policy.OnError)
+	}
+	seen := make(map[string]struct{}, len(policy.Admission))
+	for _, resource := range policy.Admission {
+		name := strings.TrimSpace(resource.Name)
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("step %q declares admission resource %q more than once", step, name)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
 }
 
 func (runner *typedRunner[I, O]) run(ctx context.Context, in <-chan erasedItem, out chan<- erasedItem) error {

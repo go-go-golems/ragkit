@@ -34,11 +34,12 @@ func DocumentSummaries(
 	if generate == nil {
 		return nil, errors.New("the document summary builder needs a generation function")
 	}
-	// First chunk per document: first appearance in the chunk slice, which the
-	// chunkers emit in document order.
+	// First chunk per document by source order. Callers may combine or shuffle
+	// chunk slices, so input order is not a reliable hydration boundary.
 	firstChunk := make(map[string]rag.Chunk, len(documents))
 	for _, chunk := range chunks {
-		if _, ok := firstChunk[chunk.DocumentID]; !ok {
+		current, ok := firstChunk[chunk.DocumentID]
+		if !ok || chunkBefore(chunk, current) {
 			firstChunk[chunk.DocumentID] = chunk
 		}
 	}
@@ -75,4 +76,17 @@ func DocumentSummaries(
 		reps = append(reps, rep)
 	}
 	return reps, nil
+}
+
+func chunkBefore(left, right rag.Chunk) bool {
+	if left.Ordinal != right.Ordinal {
+		return left.Ordinal < right.Ordinal
+	}
+	if left.Range.ByteStart != right.Range.ByteStart {
+		return left.Range.ByteStart < right.Range.ByteStart
+	}
+	if left.Range.ByteEnd != right.Range.ByteEnd {
+		return left.Range.ByteEnd < right.Range.ByteEnd
+	}
+	return left.ID < right.ID
 }

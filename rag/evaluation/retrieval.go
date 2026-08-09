@@ -219,9 +219,13 @@ func reciprocalRank(ids []string, relevant map[string]float64) float64 {
 }
 
 func ndcg(ids []string, relevant map[string]float64, cutoff int) float64 {
+	maxGrade := 0.0
+	for _, grade := range relevant {
+		maxGrade = max(maxGrade, grade)
+	}
 	var actual float64
 	for index, id := range ids[:min(cutoff, len(ids))] {
-		actual += gain(relevant[id], index)
+		actual += gain(relevant[id], maxGrade, index)
 	}
 	grades := make([]float64, 0, len(relevant))
 	for _, grade := range relevant {
@@ -230,7 +234,7 @@ func ndcg(ids []string, relevant map[string]float64, cutoff int) float64 {
 	sort.Slice(grades, func(left, right int) bool { return grades[left] > grades[right] })
 	var ideal float64
 	for index, grade := range grades[:min(cutoff, len(grades))] {
-		ideal += gain(grade, index)
+		ideal += gain(grade, maxGrade, index)
 	}
 	if ideal == 0 {
 		return 0
@@ -238,6 +242,8 @@ func ndcg(ids []string, relevant map[string]float64, cutoff int) float64 {
 	return actual / ideal
 }
 
-func gain(grade float64, index int) float64 {
-	return (math.Pow(2, grade) - 1) / math.Log2(float64(index+2))
+func gain(grade, scale float64, index int) float64 {
+	// Scale every gain by the same 2^-scale factor. The factor cancels in
+	// actual/ideal, while Exp2(grade-scale) cannot overflow.
+	return (math.Exp2(grade-scale) - math.Exp2(-scale)) / math.Log2(float64(index+2))
 }

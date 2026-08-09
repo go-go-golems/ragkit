@@ -153,7 +153,7 @@ func (s ExtractiveSummarizer) Summarize(_ context.Context, chunk rag.Chunk) (str
 	// Lead sentence: up to the first period, question mark, or newline, capped
 	// at maxRunes. Both the boundary and the cap are rune offsets.
 	for index, current := range runes {
-		if index > max {
+		if index >= max {
 			break
 		}
 		if index > 0 && strings.ContainsRune(".?!\n", current) {

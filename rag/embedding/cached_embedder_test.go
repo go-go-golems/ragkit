@@ -16,6 +16,14 @@ type failingTextEmbedder struct {
 	calls  atomic.Int64
 }
 
+type billedFailingEmbedder struct{}
+
+func (billedFailingEmbedder) Embed(context.Context, rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
+	tokens := int64(7)
+	cost := 0.25
+	return rag.EmbeddingResult{Usage: rag.Usage{EmbeddingTokens: &tokens, CostUSD: &cost}}, errors.New("billed failure")
+}
+
 func (e *failingTextEmbedder) Embed(_ context.Context, request rag.EmbeddingRequest) (rag.EmbeddingResult, error) {
 	e.calls.Add(1)
 	if len(request.Texts) == 1 && request.Texts[0] == e.failOn {
@@ -151,6 +159,25 @@ func TestCachedEmbedderBudgetsQueryMisses(t *testing.T) {
 	}
 	if provider.calls.Load() != 0 {
 		t.Fatalf("provider calls = %d, want 0", provider.calls.Load())
+	}
+}
+
+func TestCachedEmbedderRecordsUsageReturnedWithProviderError(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedder, err := NewCachedEmbedder(billedFailingEmbedder{}, CachedEmbedderOptions{Cache: cache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = embedder.Embed(t.Context(), rag.EmbeddingRequest{Model: "model", Texts: []string{"oak"}})
+	if err == nil {
+		t.Fatal("Embed() error = nil, want provider failure")
+	}
+	usage := embedder.Snapshot().Usage
+	if usage.EmbeddingTokens == nil || *usage.EmbeddingTokens != 7 || usage.CostUSD == nil || *usage.CostUSD != 0.25 {
+		t.Fatalf("snapshot usage = %+v", usage)
 	}
 }
 

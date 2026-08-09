@@ -47,9 +47,10 @@ func Batched[I, O any](repair Step[I, O], spec BatchSpec[I, O]) Step[I, O] {
 		name = repair.Name + "-groups"
 	}
 	step := Step[I, O]{
-		Name:       name,
-		Policy:     spec.Policy,
-		extraPlans: policyPlans(repair.Name, repair.Policy),
+		Name:          name,
+		Policy:        spec.Policy,
+		extraPlans:    policyPlans(repair.Name, repair.Policy),
+		extraPolicies: []policySpec{{step: repair.Name, policy: repair.Policy}},
 	}
 	step.override = func(ctx context.Context, items []I, o Options, onResult func(context.Context, int, O, execution.CacheOutcome) error) ([]Result[O], Report, error) {
 		return runBatched(ctx, repair, spec, name, items, o, onResult)

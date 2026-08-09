@@ -90,12 +90,13 @@ func (e *CachedEmbedder) Embed(ctx context.Context, request rag.EmbeddingRequest
 		},
 	}, func(ctx context.Context, current item) ([]float32, error) {
 		result, err := e.embedder.Embed(ctx, rag.EmbeddingRequest{Model: current.Model, Texts: []string{current.Text}})
+		// Provider work may be billed even when the call returns an error.
+		usage.Add(result.Usage)
 		if err != nil {
 			return nil, err
 		}
 		// Provider work has already been billed even when its output later
 		// fails shape or finite-value validation.
-		usage.Add(result.Usage)
 		if len(result.Vectors) != 1 {
 			return nil, errors.Errorf("embedder returned %d vectors for one text", len(result.Vectors))
 		}

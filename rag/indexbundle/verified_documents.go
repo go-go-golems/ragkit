@@ -24,6 +24,13 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	if err != nil {
 		return nil, errors.Wrap(err, "load index bundle manifest")
 	}
+	bundleContents, err := loadData(bundlePath, manifest)
+	if err != nil {
+		return nil, errors.Wrap(err, "load index bundle data")
+	}
+	if err := validateStoredIdentity(manifest, bundleContents); err != nil {
+		return nil, errors.Wrap(err, "validate index bundle identity")
+	}
 	corpusPath, err := resolveVerifiedCorpusPath(corpusRoot, manifest.CorpusPath)
 	if err != nil {
 		return nil, err

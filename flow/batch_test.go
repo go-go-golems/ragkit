@@ -367,3 +367,40 @@ func TestBatchedInsidePipeActsAsBarrierStage(t *testing.T) {
 	require.Equal(t, 3, report.Step("upper").Items)
 	require.Equal(t, 2, report.Step("chunk-groups").Items)
 }
+
+func TestBatchedBarrierRestoresOriginalInputOrder(t *testing.T) {
+	release := make(chan struct{})
+	upstream := Step[string, string]{
+		Name: "reordering-upstream", Policy: Policy{Workers: 2},
+		Do: func(_ context.Context, item string) (string, error) {
+			if item == "a" {
+				<-release
+			} else {
+				close(release)
+			}
+			return item, nil
+		},
+	}
+	var received []string
+	spec := BatchSpec[string, string]{
+		Policy: Policy{Workers: 1},
+		Group: func(items []string) [][]int {
+			indexes := make([]int, len(items))
+			for i := range items {
+				indexes[i] = i
+			}
+			return [][]int{indexes}
+		},
+		DoAll: func(_ context.Context, group []string) (string, error) {
+			received = append([]string(nil), group...)
+			response := map[string]string{"0": group[0], "1": group[1]}
+			data, err := json.Marshal(response)
+			return string(data), err
+		},
+		Split: splitJSON,
+	}
+	batched := Batched(chunkStep(nil), spec)
+	_, _, err := Run(t.Context(), Pipe2(upstream, batched), []string{"a", "b"}, Options{})
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, received)
+}

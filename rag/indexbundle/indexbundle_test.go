@@ -233,6 +233,12 @@ func TestBuildRejectsInvalidCorpusBeforeCreatingBackends(t *testing.T) {
 				input.Representations[0].ContentDigest = digest.Text(input.Representations[0].Text)
 			},
 		},
+		{
+			name: "chunker identity mismatch", want: "bundle declares",
+			mutate: func(input *BuildInput) {
+				input.Chunker.Name = "other-chunker"
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -244,6 +250,21 @@ func TestBuildRejectsInvalidCorpusBeforeCreatingBackends(t *testing.T) {
 			require.ErrorContains(t, err, test.want)
 			_, statErr := os.Stat(root)
 			require.ErrorIs(t, statErr, os.ErrNotExist, "corpus validation must run before backend setup")
+		})
+	}
+}
+
+func TestBuildRejectsInvalidVectorBackendIdentity(t *testing.T) {
+	for name, mutate := range map[string]func(*VectorIdentity){
+		"backend": func(identity *VectorIdentity) { identity.Backend = "hnsw" },
+		"version": func(identity *VectorIdentity) { identity.Version = 2 },
+		"channel": func(identity *VectorIdentity) { identity.Channel = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+			mutate(input.Embedding)
+			_, err := Build(t.Context(), input)
+			require.ErrorContains(t, err, "sqlite-exact backend version 1")
 		})
 	}
 }
@@ -315,6 +336,25 @@ func TestOpenValidatesChunkDigestWithoutRawRepresentations(t *testing.T) {
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.ErrorContains(t, err, "content digest mismatch")
+}
+
+func TestOpenRejectsInconsistentStoredChunkRange(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	result, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	chunksPath := filepath.Join(result.Path, chunksName)
+	var chunks []rag.Chunk
+	require.NoError(t, readJSON(chunksPath, &chunks))
+	chunks[0].Range.ByteEnd++
+	data, err := json.Marshal(chunks)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(chunksPath, data, 0o600))
+
+	_, err = Open(t.Context(), OpenOptions{
+		Path: result.Path, QueryEmbedder: input.QueryEmbedder, EmbeddingProvider: "hash",
+		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+	})
+	require.ErrorContains(t, err, "invalid stored byte range")
 }
 
 func TestOpenRejectsPersistedBackendContentChanges(t *testing.T) {
