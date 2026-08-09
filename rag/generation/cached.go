@@ -116,10 +116,10 @@ func GenerateCached(
 		},
 	}, func(ctx context.Context, request rag.GenerationRequest) (GenerationCacheEnvelope, error) {
 		result, err := generator.Generate(ctx, request)
+		usage.Add(result.Usage)
 		if err != nil {
 			return GenerationCacheEnvelope{}, err
 		}
-		usage.Add(result.Usage)
 		return GenerationCacheEnvelope{Result: result}, nil
 	}, callback...)
 	report.Cache = cacheReport

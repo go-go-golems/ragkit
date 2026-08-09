@@ -47,6 +47,11 @@ type Step[I, O any] struct {
 	// meters record what this run actually spent.
 	Meter func(O) Meters
 
+	// AttemptMeter optionally meters every fresh Do result, including results
+	// returned with an error. Use it when a provider reports billable usage on
+	// failed attempts. A step should set either Meter or AttemptMeter, not both.
+	AttemptMeter func(O, error) Meters
+
 	// OnResult optionally observes every successful item (cache hits and
 	// fresh work, never quarantined or skipped items) as it completes, in
 	// completion order, with its input index and cache outcome. Streaming

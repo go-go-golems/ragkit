@@ -60,12 +60,9 @@ func FlowStep(
 		Policy: policy,
 		Do: func(ctx context.Context, request rag.GenerationRequest) (GenerationCacheEnvelope, error) {
 			result, err := generator.Generate(ctx, request)
-			if err != nil {
-				return GenerationCacheEnvelope{}, err
-			}
-			return GenerationCacheEnvelope{Result: result}, nil
+			return GenerationCacheEnvelope{Result: result}, err
 		},
-		Meter: func(envelope GenerationCacheEnvelope) flow.Meters {
+		AttemptMeter: func(envelope GenerationCacheEnvelope, _ error) flow.Meters {
 			return UsageMeters(envelope.Result.Usage)
 		},
 	}, nil

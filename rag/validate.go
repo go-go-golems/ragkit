@@ -71,6 +71,7 @@ func ValidateCorpus(documents []Document, chunks []Chunk) error {
 		documentByID[document.ID] = document
 	}
 	chunkIDs := make(map[string]struct{}, len(chunks))
+	ordinals := make(map[string]map[int]struct{}, len(documents))
 	for index, chunk := range chunks {
 		if _, exists := chunkIDs[chunk.ID]; exists {
 			return fmt.Errorf("duplicate chunk ID %q", chunk.ID)
@@ -80,6 +81,16 @@ func ValidateCorpus(documents []Document, chunks []Chunk) error {
 		if !exists {
 			return fmt.Errorf("chunk %d references unknown document %q", index, chunk.DocumentID)
 		}
+		if chunk.Ordinal < 0 {
+			return fmt.Errorf("chunk %d has negative ordinal %d", index, chunk.Ordinal)
+		}
+		if ordinals[chunk.DocumentID] == nil {
+			ordinals[chunk.DocumentID] = map[int]struct{}{}
+		}
+		if _, duplicate := ordinals[chunk.DocumentID][chunk.Ordinal]; duplicate {
+			return fmt.Errorf("chunk %d duplicates ordinal %d for document %q", index, chunk.Ordinal, chunk.DocumentID)
+		}
+		ordinals[chunk.DocumentID][chunk.Ordinal] = struct{}{}
 		if err := ValidateChunk(document, chunk); err != nil {
 			return fmt.Errorf("chunk %d: %w", index, err)
 		}

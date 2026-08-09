@@ -54,6 +54,11 @@ const DefaultHyDEPrompt = "Write a short plausible answer to the question," +
 // ValidateRequest rejects ambiguous or impossible work before any component is
 // called.
 func (s *Service) ValidateRequest(request Request) error {
+	switch s.CitationStyle {
+	case "", CitationStyleChunkID, CitationStyleOrdinal:
+	default:
+		return errors.Errorf("unsupported citation style %q", s.CitationStyle)
+	}
 	if strings.TrimSpace(request.TurnID) == "" {
 		return errors.New("turn ID is required")
 	}
@@ -351,6 +356,10 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 		if err != nil {
 			return RetrievalResult{}, errors.Wrap(err, "augment retrieval")
 		}
+		augmented.Evidence, err = validateAugmentedEvidence(s.Chunks, augmented.Evidence)
+		if err != nil {
+			return RetrievalResult{}, errors.Wrap(err, "validate augmenter output")
+		}
 		result = augmented
 		result.AugmentationTrace = trace
 	}
@@ -636,6 +645,32 @@ func validateRerankedEvidence(candidates, returned []rag.Evidence, requested int
 		candidate.Rank = index + 1
 		candidate.RerankerScore = item.RerankerScore
 		validated = append(validated, candidate)
+	}
+	return validated, nil
+}
+
+// validateAugmentedEvidence treats augmenter chunks as references into the
+// service-owned corpus. The augmenter may choose order and scores, but it may
+// neither introduce nor alter source content.
+func validateAugmentedEvidence(chunks []rag.Chunk, returned []rag.Evidence) ([]rag.Evidence, error) {
+	byID := make(map[string]rag.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		byID[chunk.ID] = chunk
+	}
+	seen := make(map[string]struct{}, len(returned))
+	validated := make([]rag.Evidence, len(returned))
+	for index, item := range returned {
+		id := item.Chunk.ID
+		chunk, ok := byID[id]
+		if !ok {
+			return nil, errors.Errorf("augmenter result %d references unknown chunk %q", index, id)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, errors.Errorf("augmenter returned duplicate chunk %q", id)
+		}
+		seen[id] = struct{}{}
+		item.Chunk = chunk
+		validated[index] = item
 	}
 	return validated, nil
 }

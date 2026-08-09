@@ -179,6 +179,22 @@ func TestGenerateCachedReportsFailedWrite(t *testing.T) {
 	require.Equal(t, 1, report.Cache.WorkCalls)
 }
 
+type failedUsageGenerator struct{}
+
+func (failedUsageGenerator) Generate(context.Context, rag.GenerationRequest) (rag.GenerationResult, error) {
+	tokens := int64(9)
+	return rag.GenerationResult{Usage: rag.Usage{OutputTokens: &tokens}}, errors.New("provider failed")
+}
+
+func TestGenerateCachedReportsUsageFromFailedProviderCall(t *testing.T) {
+	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: t.TempDir()})
+	require.NoError(t, err)
+	_, report, err := GenerateCached(t.Context(), []rag.GenerationRequest{generationRequest("one")}, cachedOptions(cache, nil), failedUsageGenerator{})
+	require.Error(t, err)
+	require.NotNil(t, report.Usage.OutputTokens)
+	require.Equal(t, int64(9), *report.Usage.OutputTokens)
+}
+
 func TestGenerateCachedFailsClosedOnCorruptEntry(t *testing.T) {
 	root := t.TempDir()
 	cache, err := execution.NewFileCache(execution.FileCacheOptions{Directory: root})

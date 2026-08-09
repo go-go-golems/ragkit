@@ -77,6 +77,12 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 				existing.BundleID, bundleID,
 			)
 		}
+		if existing.CorpusPath != input.CorpusPath {
+			return BuildResult{}, errors.Errorf(
+				"existing bundle corpus path %q differs from requested %q",
+				existing.CorpusPath, input.CorpusPath,
+			)
+		}
 		data, validateErr := loadData(finalPath, existing)
 		if validateErr != nil {
 			return BuildResult{}, errors.Wrap(validateErr, "existing bundle is incomplete")

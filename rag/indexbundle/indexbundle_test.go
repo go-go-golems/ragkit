@@ -96,6 +96,25 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 	require.NoError(t, bundle.Close(), "close must be idempotent")
 }
 
+func TestBuildRejectsReuseForDifferentCorpusPath(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	_, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	input.CorpusPath = "replacement/corpus.json"
+	_, err = Build(t.Context(), input)
+	require.ErrorContains(t, err, "differs from requested")
+}
+
+func TestValidateStoredChunksRejectsInvalidOrdinals(t *testing.T) {
+	base := rag.Chunk{ID: "a", DocumentID: "doc", Ordinal: 0, Text: "a", ContentDigest: digest.Text("a"), Range: rag.Range{ByteEnd: 1}}
+	negative := base
+	negative.Ordinal = -1
+	require.ErrorContains(t, validateStoredChunks([]rag.Chunk{negative}, 1), "negative ordinal")
+	duplicate := base
+	duplicate.ID = "b"
+	require.ErrorContains(t, validateStoredChunks([]rag.Chunk{base, duplicate}, 1), "duplicate ordinal")
+}
+
 func TestBuildRejectsReuseWhenStoredSemanticIdentityIsCorrupt(t *testing.T) {
 	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
 	result, err := Build(t.Context(), input)
