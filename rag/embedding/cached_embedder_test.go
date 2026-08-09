@@ -171,13 +171,16 @@ func TestCachedEmbedderRecordsUsageReturnedWithProviderError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = embedder.Embed(t.Context(), rag.EmbeddingRequest{Model: "model", Texts: []string{"oak"}})
+	result, err := embedder.Embed(t.Context(), rag.EmbeddingRequest{Model: "model", Texts: []string{"oak"}})
 	if err == nil {
 		t.Fatal("Embed() error = nil, want provider failure")
 	}
 	usage := embedder.Snapshot().Usage
 	if usage.EmbeddingTokens == nil || *usage.EmbeddingTokens != 7 || usage.CostUSD == nil || *usage.CostUSD != 0.25 {
 		t.Fatalf("snapshot usage = %+v", usage)
+	}
+	if result.Usage.EmbeddingTokens == nil || *result.Usage.EmbeddingTokens != 7 || result.Usage.CostUSD == nil || *result.Usage.CostUSD != 0.25 {
+		t.Fatalf("returned usage = %+v", result.Usage)
 	}
 }
 

@@ -74,7 +74,7 @@ func (g *CachedGenerator) Generate(
 	}
 	g.mutex.Unlock()
 	if err != nil {
-		return rag.GenerationResult{}, err
+		return rag.GenerationResult{Usage: report.Usage}, err
 	}
 	return results[0], nil
 }

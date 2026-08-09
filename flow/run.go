@@ -262,14 +262,37 @@ func resourcePlansEqual(left, right execution.ResourcePlan) bool {
 }
 
 func retryDelay(delay, cap time.Duration) time.Duration {
+	if cap <= 0 {
+		return 0
+	}
+	if delay < 0 {
+		delay = 0
+	}
 	if delay > cap {
 		delay = cap
 	}
-	jittered := delay + time.Duration(rand.Int63n(int64(delay)/2+1))
-	if jittered > cap {
+	jitterLimit := delay / 2
+	jitter := time.Duration(rand.Int63n(int64(jitterLimit) + 1))
+	if delay >= cap-jitter {
 		return cap
 	}
-	return jittered
+	return delay + jitter
+}
+
+func nextRetryDelay(delay, cap time.Duration) time.Duration {
+	if cap <= 0 {
+		return 0
+	}
+	if delay >= cap {
+		return cap
+	}
+	if delay <= 0 {
+		return 0
+	}
+	if delay > cap-delay {
+		return cap
+	}
+	return delay * 2
 }
 
 func (env *runEnv) limiter(name string) execution.Limiter {
@@ -968,10 +991,7 @@ func (runner *typedRunner[I, O]) work(ctx context.Context, index int, item I, ke
 				return erasedItem{}, ctx.Err()
 			case <-time.After(jittered):
 			}
-			delay *= 2
-			if delay > runner.backoff.Cap {
-				delay = runner.backoff.Cap
-			}
+			delay = nextRetryDelay(delay, runner.backoff.Cap)
 		}
 		if name, err := runner.options.env.admit(ctx, runner.resources, 1); err != nil {
 			if errors.Is(err, execution.ErrBudgetExceeded) {

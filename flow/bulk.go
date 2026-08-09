@@ -219,10 +219,7 @@ func runBulk[I, O any](
 					return struct{}{}, ctx.Err()
 				case <-time.After(jittered):
 				}
-				delay *= 2
-				if delay > backoff.Cap {
-					delay = backoff.Cap
-				}
+				delay = nextRetryDelay(delay, backoff.Cap)
 			}
 			if name, err := o.env.admit(ctx, resources, units); err != nil {
 				if errors.Is(err, execution.ErrBudgetExceeded) {

@@ -1,6 +1,7 @@
 package indexbundle
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,21 @@ import (
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCancellationRemainsCancellationAcrossBundleOperations(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	_, err := Build(ctx, input)
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = Inspect(ctx, t.TempDir())
+	require.ErrorIs(t, err, context.Canceled)
+	_, err = Open(ctx, OpenOptions{Path: t.TempDir()})
+	require.ErrorIs(t, err, context.Canceled)
+	_, err = LoadVerifiedDocuments(ctx, t.TempDir(), t.TempDir())
+	require.ErrorIs(t, err, context.Canceled)
+}
 
 func verifiedDocumentsFixture(t *testing.T) (string, string, []rag.Document) {
 	t.Helper()
@@ -93,6 +109,21 @@ func TestLoadVerifiedDocumentsRejectsUntrustedCorpusIdentity(t *testing.T) {
 		_, err = LoadVerifiedDocuments(t.Context(), bundlePath, root)
 		require.ErrorContains(t, err, "2")
 	})
+}
+
+func TestLoadVerifiedDocumentsRejectsUnknownFixedSchemaCorpusField(t *testing.T) {
+	root, bundlePath, documents := verifiedDocumentsFixture(t)
+	data, err := json.Marshal(documents)
+	require.NoError(t, err)
+	var raw []map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	raw[0]["unknown_future_field"] = true
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "corpus.json"), data, 0o600))
+
+	_, err = LoadVerifiedDocuments(t.Context(), bundlePath, root)
+	require.ErrorContains(t, err, "unknown field")
 }
 
 func TestLoadVerifiedDocumentsRejectsPathsOutsideRoot(t *testing.T) {

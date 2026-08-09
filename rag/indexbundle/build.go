@@ -24,6 +24,9 @@ const (
 )
 
 func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
+	if err := ctx.Err(); err != nil {
+		return BuildResult{}, err
+	}
 	if err := validateBuildInput(input); err != nil {
 		return BuildResult{}, err
 	}
@@ -68,10 +71,11 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	}
 	finalPath := filepath.Join(input.OutputRoot, bundleID)
 	if _, statErr := os.Stat(finalPath); statErr == nil {
-		existing, loadErr := LoadManifest(finalPath)
+		existingState, loadErr := loadVerifiedManifest(ctx, finalPath)
 		if loadErr != nil {
 			return BuildResult{}, errors.Wrap(loadErr, "existing bundle is invalid")
 		}
+		existing := existingState.manifest
 		if existing.BundleID != bundleID {
 			return BuildResult{}, errors.Errorf(
 				"existing bundle ID %q differs from expected %q",
@@ -84,11 +88,11 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 				existing.CorpusPath, input.CorpusPath,
 			)
 		}
-		data, validateErr := loadData(finalPath, existing)
+		chunks, validateErr := loadVerifiedChunks(ctx, existingState)
 		if validateErr != nil {
 			return BuildResult{}, errors.Wrap(validateErr, "existing bundle is incomplete")
 		}
-		if validateErr := validateStoredIdentity(existing, data); validateErr != nil {
+		if _, validateErr := loadVerifiedData(ctx, chunks); validateErr != nil {
 			return BuildResult{}, errors.Wrap(validateErr, "existing bundle identity is invalid")
 		}
 		return measureResult(ctx, finalPath, existing, true)

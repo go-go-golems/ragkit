@@ -29,7 +29,9 @@ type GenerationResult struct {
 	Usage        Usage    `json:"usage"`
 }
 
-// Generator performs one text-generation operation.
+// Generator performs one text-generation operation. A non-nil error does not
+// imply an empty result: providers and decorators must preserve any result
+// fields, especially billed Usage, that were produced before the error.
 type Generator interface {
 	Generate(context.Context, GenerationRequest) (GenerationResult, error)
 }
@@ -46,7 +48,9 @@ type EmbeddingResult struct {
 	Usage   Usage       `json:"usage"`
 }
 
-// Embedder embeds a batch of text.
+// Embedder embeds a batch of text. A non-nil error does not imply an empty
+// result: providers and decorators must preserve all known billed Usage. A
+// decorator may omit vectors when it cannot return a correctly aligned batch.
 type Embedder interface {
 	Embed(context.Context, EmbeddingRequest) (EmbeddingResult, error)
 }
@@ -76,7 +80,9 @@ type RerankResult struct {
 	Usage    Usage      `json:"usage"`
 }
 
-// Reranker reorders hydrated source evidence.
+// Reranker reorders hydrated source evidence. A non-nil error does not imply
+// an empty result: providers and decorators must preserve all known billed
+// Usage. Evidence may be empty when no complete ordering can be returned.
 type Reranker interface {
 	Rerank(context.Context, RerankRequest) (RerankResult, error)
 }

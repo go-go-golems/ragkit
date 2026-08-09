@@ -104,17 +104,26 @@ func NewFlowBatcher(
 
 // Generate runs one batch of requests, in the BatchGenerate shape.
 func (batcher *FlowBatcher) Generate(ctx context.Context, requests []rag.GenerationRequest) ([]rag.GenerationResult, error) {
+	results, _, err := batcher.generate(ctx, requests)
+	return results, err
+}
+
+// generate runs the batch and returns the usage charged by this invocation.
+// The internal helper lets FlowGenerator preserve billed usage on an error
+// without returning the batcher's cumulative ledger as if it were per-call.
+func (batcher *FlowBatcher) generate(ctx context.Context, requests []rag.GenerationRequest) ([]rag.GenerationResult, rag.Usage, error) {
 	results, report, err := flow.Run(ctx, batcher.step, requests, batcher.options)
 	stepReport := report.Step(batcher.step.Name)
+	freshUsage := UsageFromMeters(stepReport.Meters)
 	batcher.mutex.Lock()
 	batcher.hits += stepReport.Hits
 	batcher.workCalls += stepReport.WorkCalls - stepReport.Retries
-	batcher.usage.Add(UsageFromMeters(stepReport.Meters))
+	batcher.usage.Add(freshUsage)
 	batcher.mutex.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, freshUsage, err
 	}
-	return Unwrap(results), nil
+	return Unwrap(results), freshUsage, nil
 }
 
 // Counters returns the accumulated cache hits and work calls (legacy
@@ -157,9 +166,9 @@ func NewFlowGenerator(
 
 // Generate implements rag.Generator.
 func (adapter *FlowGenerator) Generate(ctx context.Context, request rag.GenerationRequest) (rag.GenerationResult, error) {
-	results, err := adapter.batcher.Generate(ctx, []rag.GenerationRequest{request})
+	results, usage, err := adapter.batcher.generate(ctx, []rag.GenerationRequest{request})
 	if err != nil {
-		return rag.GenerationResult{}, err
+		return rag.GenerationResult{Usage: usage}, err
 	}
 	return results[0], nil
 }

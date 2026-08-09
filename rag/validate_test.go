@@ -1,11 +1,31 @@
 package rag
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/stretchr/testify/require"
 )
+
+func TestValidateHitsRejectsIncompleteInvalidAndNonFiniteResults(t *testing.T) {
+	valid := Hit{RepresentationID: "rep", ChunkID: "chunk", DocumentID: "doc", Channel: "bm25", Rank: 1, Score: 0.5}
+	require.NoError(t, ValidateHits([]Hit{valid}))
+
+	for name, mutate := range map[string]func(*Hit){
+		"missing identity":  func(hit *Hit) { hit.ChunkID = "" },
+		"invalid rank":      func(hit *Hit) { hit.Rank = 0 },
+		"nan":               func(hit *Hit) { hit.Score = math.NaN() },
+		"positive infinity": func(hit *Hit) { hit.Score = math.Inf(1) },
+		"negative infinity": func(hit *Hit) { hit.Score = math.Inf(-1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			hit := valid
+			mutate(&hit)
+			require.Error(t, ValidateHits([]Hit{hit}))
+		})
+	}
+}
 
 func TestValidateChunk(t *testing.T) {
 	t.Parallel()

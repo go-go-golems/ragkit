@@ -98,6 +98,42 @@ func TestLoadDocumentsRejectsEmptyCorpus(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLoadersRejectUnknownFieldsAndTrailingValues(t *testing.T) {
+	tests := []struct {
+		name string
+		load func(string) error
+		data string
+	}{
+		{
+			name: "document unknown field",
+			load: func(path string) error { _, err := LoadDocuments(path); return err },
+			data: `[{"id":"doc","text":"body","content_digest":"` + digest.Text("body") + `","surprise":true}]`,
+		},
+		{
+			name: "evaluation unknown field",
+			load: func(path string) error { _, err := LoadEvaluation(path); return err },
+			data: `{"queries":[{"id":"q","text":"question"}],"judgments":[],"surprise":true}`,
+		},
+		{
+			name: "document trailing value",
+			load: func(path string) error { _, err := LoadDocuments(path); return err },
+			data: `[] {}`,
+		},
+		{
+			name: "evaluation trailing value",
+			load: func(path string) error { _, err := LoadEvaluation(path); return err },
+			data: `{"queries":[{"id":"q","text":"question"}]} []`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "input.json")
+			require.NoError(t, os.WriteFile(path, []byte(test.data), 0o644))
+			require.Error(t, test.load(path))
+		})
+	}
+}
+
 func TestLoadDocumentsRejectsInvalidAndDuplicateDocuments(t *testing.T) {
 	for _, documents := range [][]rag.Document{
 		{{ID: "doc", Text: "body", ContentDigest: "wrong"}},

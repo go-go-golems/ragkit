@@ -2,11 +2,30 @@ package rag
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/go-go-golems/ragkit/digest"
 )
+
+// ValidateHits rejects search results that cannot be serialized or ranked
+// consistently. Search backends own identity and ordering details; every
+// backend result must nevertheless have finite scores and positive ranks.
+func ValidateHits(hits []Hit) error {
+	for index, hit := range hits {
+		if strings.TrimSpace(hit.RepresentationID) == "" || strings.TrimSpace(hit.ChunkID) == "" || strings.TrimSpace(hit.DocumentID) == "" {
+			return fmt.Errorf("hit %d has incomplete identity", index)
+		}
+		if hit.Rank < 1 {
+			return fmt.Errorf("hit %d has invalid rank %d", index, hit.Rank)
+		}
+		if math.IsNaN(hit.Score) || math.IsInf(hit.Score, 0) {
+			return fmt.Errorf("hit %d has a non-finite score", index)
+		}
+	}
+	return nil
+}
 
 // ValidateDocument checks the invariants common to every corpus loader.
 func ValidateDocument(document Document) error {

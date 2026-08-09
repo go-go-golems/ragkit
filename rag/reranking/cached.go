@@ -84,7 +84,7 @@ func (r *CachedReranker) Rerank(
 	r.report.Usage.Add(report.Usage)
 	r.mutex.Unlock()
 	if err != nil {
-		return rag.RerankResult{}, err
+		return rag.RerankResult{Usage: report.Usage}, err
 	}
 	return results[0], nil
 }
