@@ -77,10 +77,10 @@ func (generator *observedGenerator) Generate(
 		observation.ProviderError = providerErr.Error()
 	}
 	if err := generator.observer(context.WithoutCancel(ctx), observation); err != nil {
-		return rag.GenerationResult{}, errors.Wrap(err, "observe generation provider call")
+		return result, errors.Wrap(err, "observe generation provider call")
 	}
 	if providerErr != nil {
-		return rag.GenerationResult{}, providerErr
+		return result, providerErr
 	}
 	return result, nil
 }

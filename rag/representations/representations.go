@@ -163,7 +163,10 @@ func (s ExtractiveSummarizer) Summarize(_ context.Context, chunk rag.Chunk) (str
 	if len(runes) <= max {
 		return text, nil
 	}
-	return string(runes[:max]) + "…", nil
+	if max == 1 {
+		return "…", nil
+	}
+	return string(runes[:max-1]) + "…", nil
 }
 
 // Summaries is a convenience that builds summary representations for every

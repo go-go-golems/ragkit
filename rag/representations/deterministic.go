@@ -73,16 +73,31 @@ func SmallToBig(small, parents []rag.Chunk) ([]rag.Representation, error) {
 	return reps, nil
 }
 
-// bestParent picks the parent chunk with the largest byte overlap.
+// bestParent picks the parent chunk with the largest byte overlap, breaking
+// ties by stable source position and identity rather than caller order.
 func bestParent(chunk rag.Chunk, parents []rag.Chunk) (rag.Chunk, bool) {
 	best := rag.Chunk{}
 	bestOverlap := 0
 	for _, parent := range parents {
 		start := max(chunk.Range.ByteStart, parent.Range.ByteStart)
 		end := min(chunk.Range.ByteEnd, parent.Range.ByteEnd)
-		if end-start > bestOverlap {
-			best, bestOverlap = parent, end-start
+		overlap := end - start
+		if overlap > bestOverlap || (overlap == bestOverlap && overlap > 0 && parentBefore(parent, best)) {
+			best, bestOverlap = parent, overlap
 		}
 	}
 	return best, bestOverlap > 0
+}
+
+func parentBefore(left, right rag.Chunk) bool {
+	if left.Ordinal != right.Ordinal {
+		return left.Ordinal < right.Ordinal
+	}
+	if left.Range.ByteStart != right.Range.ByteStart {
+		return left.Range.ByteStart < right.Range.ByteStart
+	}
+	if left.Range.ByteEnd != right.Range.ByteEnd {
+		return left.Range.ByteEnd < right.Range.ByteEnd
+	}
+	return left.ID < right.ID
 }

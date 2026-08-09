@@ -44,6 +44,7 @@ type Manifest struct {
 	BundleID            string          `json:"bundle_id"`
 	CreatedAt           time.Time       `json:"created_at"`
 	CorpusDigest        string          `json:"corpus_digest"`
+	ChunkDigest         string          `json:"chunk_digest"`
 	CorpusPath          string          `json:"corpus_path"`
 	DocumentCount       int             `json:"document_count"`
 	ChunkCount          int             `json:"chunk_count"`

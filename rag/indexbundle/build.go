@@ -47,8 +47,8 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 			return BuildResult{}, errors.Wrap(err, "digest bundle vector content")
 		}
 	}
-	bundleID, corpusDigest, representationDigest, kinds, err := CalculateID(
-		input.Documents, input.Representations, input.Chunker,
+	bundleID, corpusDigest, chunkDigest, representationDigest, kinds, err := CalculateID(
+		input.Documents, input.Chunks, input.Representations, input.Chunker,
 		lexicalTemplate, vectorIdentity,
 	)
 	if err != nil {
@@ -60,7 +60,8 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	manifest := Manifest{
 		SchemaVersion: SchemaVersion, BundleID: bundleID,
 		CreatedAt: time.Now().UTC(), CorpusDigest: corpusDigest,
-		CorpusPath: input.CorpusPath, DocumentCount: len(input.Documents),
+		ChunkDigest: chunkDigest,
+		CorpusPath:  input.CorpusPath, DocumentCount: len(input.Documents),
 		ChunkCount: len(input.Chunks), RepresentationCount: len(input.Representations),
 		Chunker: input.Chunker, RepresentationKinds: kinds,
 		Lexical: lexicalTemplate, Vector: vectorIdentity,

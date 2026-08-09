@@ -152,6 +152,21 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 	if env.gate != nil && (math.IsNaN(env.gate.MaxEstimatedUSD) || math.IsInf(env.gate.MaxEstimatedUSD, 0) || env.gate.MaxEstimatedUSD < 0) {
 		return fmt.Errorf("preflight maximum USD must be finite and non-negative")
 	}
+	type pendingPlan struct {
+		stage   stagePlan
+		plan    execution.ResourcePlan
+		budget  *execution.Budget
+		limiter execution.Limiter
+	}
+	pending := make([]pendingPlan, 0, len(plans))
+	prospectivePlans := make(map[string]execution.ResourcePlan, len(env.plans)+len(plans))
+	prospectiveOwners := make(map[string]string, len(env.owners)+len(plans))
+	for name, plan := range env.plans {
+		prospectivePlans[name] = plan
+		prospectiveOwners[name] = env.owners[name]
+	}
+	prospectiveUSD := env.estimatedUSD
+	prospectiveUnpriced := append([]string(nil), env.unpriced...)
 	for _, plan := range plans {
 		name := plan.resource.Name
 		if strings.TrimSpace(name) == "" {
@@ -159,7 +174,7 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 		}
 		converted := plan.resource.plan()
 		reference := plan.resource.Ceiling == 0 && plan.resource.Budget == 0 && plan.resource.UnitUSD == nil
-		if existing, ok := env.plans[name]; ok {
+		if existing, ok := prospectivePlans[name]; ok {
 			// A zero-valued Resource{Name: ...} is a reference to an earlier
 			// full declaration: the step draws from that budget.
 			if reference || resourcePlansEqual(existing, converted) {
@@ -167,7 +182,7 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 			}
 			return fmt.Errorf(
 				"resource %q is declared differently by steps %q and %q",
-				name, env.owners[name], plan.step,
+				name, prospectiveOwners[name], plan.step,
 			)
 		}
 		// A zero-valued resource with no earlier declaration becomes a zero
@@ -190,38 +205,49 @@ func (env *runEnv) ensure(plans []stagePlan) error {
 		}
 		if plan.resource.Ceiling > 0 {
 			if plan.resource.UnitUSD == nil {
-				env.unpriced = append(env.unpriced, name)
+				prospectiveUnpriced = append(prospectiveUnpriced, name)
 			} else {
-				env.estimatedUSD += float64(plan.resource.Ceiling) * *plan.resource.UnitUSD
+				prospectiveUSD += float64(plan.resource.Ceiling) * *plan.resource.UnitUSD
 			}
 		}
 		budget, err := execution.NewBudget(plan.resource.Budget)
 		if err != nil {
 			return fmt.Errorf("step %q: create resource %q budget: %w", plan.step, name, err)
 		}
-		env.plans[name] = converted
-		env.owners[name] = plan.step
-		env.budgets[name] = budget
-		env.limiters[name] = execution.Chain(budget, env.rates[name])
-		log.Debug().
-			Str("step", plan.step).
-			Str("resource", name).
-			Int("ceiling", plan.resource.Ceiling).
-			Int("budget", plan.resource.Budget).
-			Bool("priced", plan.resource.UnitUSD != nil).
-			Msg("flow resource plan admitted")
+		prospectivePlans[name] = converted
+		prospectiveOwners[name] = plan.step
+		pending = append(pending, pendingPlan{
+			stage: plan, plan: converted, budget: budget,
+			limiter: execution.Chain(budget, env.rates[name]),
+		})
 	}
 	if env.gate != nil {
-		if len(env.unpriced) > 0 && !env.gate.AllowUnpriced {
-			return fmt.Errorf("preflight refused the plans: pricing unavailable for %s", strings.Join(env.unpriced, ", "))
+		if len(prospectiveUnpriced) > 0 && !env.gate.AllowUnpriced {
+			return fmt.Errorf("preflight refused the plans: pricing unavailable for %s", strings.Join(prospectiveUnpriced, ", "))
 		}
-		if env.estimatedUSD > env.gate.MaxEstimatedUSD {
+		if prospectiveUSD > env.gate.MaxEstimatedUSD {
 			return fmt.Errorf(
 				"preflight refused the plans: estimated provider cost %.6f exceeds maximum USD %.6f",
-				env.estimatedUSD, env.gate.MaxEstimatedUSD,
+				prospectiveUSD, env.gate.MaxEstimatedUSD,
 			)
 		}
 	}
+	for _, admitted := range pending {
+		name := admitted.stage.resource.Name
+		env.plans[name] = admitted.plan
+		env.owners[name] = admitted.stage.step
+		env.budgets[name] = admitted.budget
+		env.limiters[name] = admitted.limiter
+		log.Debug().
+			Str("step", admitted.stage.step).
+			Str("resource", name).
+			Int("ceiling", admitted.stage.resource.Ceiling).
+			Int("budget", admitted.stage.resource.Budget).
+			Bool("priced", admitted.stage.resource.UnitUSD != nil).
+			Msg("flow resource plan admitted")
+	}
+	env.estimatedUSD = prospectiveUSD
+	env.unpriced = prospectiveUnpriced
 	return nil
 }
 

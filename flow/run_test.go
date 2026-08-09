@@ -433,6 +433,23 @@ func TestRunSharedPreflightKeepsRefusingUnpricedPlan(t *testing.T) {
 	require.Zero(t, calls.Load())
 }
 
+func TestDeclareRefusalDoesNotCommitPartialState(t *testing.T) {
+	price := 1.0
+	options := Options{Preflight: &Preflight{MaxEstimatedUSD: 1}}.Share()
+	err := options.Declare("too-expensive",
+		Resource{Name: "first", Ceiling: 1, Budget: 1, UnitUSD: &price},
+		Resource{Name: "second", Ceiling: 1, Budget: 1, UnitUSD: &price},
+	)
+	require.ErrorContains(t, err, "exceeds maximum")
+	require.Empty(t, options.Snapshots())
+	require.Zero(t, options.Cost().EstimatedUSD)
+
+	require.NoError(t, options.Declare("valid", Resource{
+		Name: "first", Ceiling: 1, Budget: 1, UnitUSD: &price,
+	}))
+	require.Contains(t, options.Snapshots(), "first")
+}
+
 func TestRunSharedResourcePlansCompareUnitPriceValues(t *testing.T) {
 	firstPrice := 0.02
 	secondPrice := 0.02

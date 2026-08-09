@@ -163,6 +163,23 @@ func TestBulkChargesEveryRetryAttemptAgainstAdmission(t *testing.T) {
 	require.Equal(t, execution.BudgetSnapshot{Limit: 2, Spent: 2, Remaining: 0}, report.Step("budgeted-bulk-retry").Spend["embedding-items"])
 }
 
+func TestBulkAttemptMeterCountsReturnedValuesOnEveryAttempt(t *testing.T) {
+	base := bulkStep("metered-bulk-retry")
+	base.Policy.Retry = fastRetry(2)
+	base.AttemptMeter = func(value int, _ error) Meters { return Meters{"tokens": float64(value)} }
+	var calls atomic.Int64
+	step := Bulk(base, func(_ context.Context, batch []int) ([]int, error) {
+		values := []int{3, 5}
+		if calls.Add(1) == 1 {
+			return values, errors.New("unexpected EOF")
+		}
+		return values[:len(batch)], nil
+	}, 10)
+	_, report, err := Run(t.Context(), step, []int{1, 2}, Options{})
+	require.NoError(t, err)
+	require.Equal(t, Meters{"tokens": 16}, report.Step("metered-bulk-retry").Meters)
+}
+
 func TestBulkRetryLedgerFailurePropagates(t *testing.T) {
 	base := bulkStep("retry-ledger-failure")
 	base.Policy.Retry = fastRetry(2)
