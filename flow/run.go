@@ -272,6 +272,7 @@ func retryDelay(delay, cap time.Duration) time.Duration {
 		delay = cap
 	}
 	jitterLimit := delay / 2
+	// #nosec G404 -- retry timing jitter is not used for a security decision or secret.
 	jitter := time.Duration(rand.Int63n(int64(jitterLimit) + 1))
 	if delay >= cap-jitter {
 		return cap

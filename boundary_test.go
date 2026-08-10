@@ -7,9 +7,9 @@ import (
 )
 
 // forbiddenCoreImports are frameworks that must never leak into the ragkit
-// core. Provider adapters (a future ragkit/providers/... tree) are the only
-// place LLM-framework dependencies are allowed; CLI frameworks are never
-// allowed because ragkit is a library. This is the ragkit port of rag-ttc's
+// core. Provider adapters under rag/provider/... are the only place
+// LLM-framework dependencies are allowed; CLI frameworks are never allowed
+// because ragkit is a library. This is the ragkit port of rag-ttc's
 // TestResearchPackagesDoNotImportTheApp boundary test.
 var forbiddenCoreImports = []string{
 	"github.com/go-go-golems/geppetto",
@@ -20,15 +20,25 @@ var forbiddenCoreImports = []string{
 }
 
 func TestCoreDoesNotImportAdapterFrameworks(t *testing.T) {
-	out, err := exec.Command("go", "list", "-deps", "./...").CombinedOutput()
+	const adapterPrefix = "github.com/go-go-golems/ragkit/rag/provider/"
+
+	out, err := exec.Command("go", "list", "-f", "{{.ImportPath}}", "./...").CombinedOutput()
 	if err != nil {
-		t.Fatalf("go list -deps: %v\n%s", err, out)
+		t.Fatalf("go list packages: %v\n%s", err, out)
 	}
-	deps := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, dep := range deps {
-		if strings.HasPrefix(dep, "github.com/go-go-golems/ragkit/providers/") {
-			continue
+	packages := strings.Fields(string(out))
+	args := []string{"list", "-deps"}
+	for _, packagePath := range packages {
+		if !strings.HasPrefix(packagePath, adapterPrefix) {
+			args = append(args, packagePath)
 		}
+	}
+
+	out, err = exec.Command("go", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list core dependencies: %v\n%s", err, out)
+	}
+	for _, dep := range strings.Fields(string(out)) {
 		for _, forbidden := range forbiddenCoreImports {
 			if strings.HasPrefix(dep, forbidden) {
 				t.Errorf("core dependency tree includes forbidden import %s", dep)

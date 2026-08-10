@@ -74,7 +74,8 @@ func Build(cfg Config, entries []Entry, embedder rag.Embedder) (*Index, error) {
 	graph.Ml = cfg.Ml
 	graph.EfSearch = cfg.EfConstruction
 	graph.Distance = hnsw.CosineDistance
-	graph.Rng = rand.New(rand.NewSource(cfg.Seed)) //nolint:gosec
+	// #nosec G404 -- reproducible HNSW construction requires a caller-owned deterministic seed.
+	graph.Rng = rand.New(rand.NewSource(cfg.Seed))
 	entryByID := make(map[string]Entry, len(stable))
 	for _, entry := range stable {
 		if strings.TrimSpace(entry.RepresentationID) == "" || strings.TrimSpace(entry.ChunkID) == "" || strings.TrimSpace(entry.DocumentID) == "" {

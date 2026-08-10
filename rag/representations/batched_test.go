@@ -15,12 +15,12 @@ func batchedFixture(chunksPerDoc ...int) ([]rag.Document, []rag.Chunk) {
 	chunks := make([]rag.Chunk, 0)
 	for d, count := range chunksPerDoc {
 		var text strings.Builder
-		text.WriteString(fmt.Sprintf("# Doc %d\n\n", d))
+		fmt.Fprintf(&text, "# Doc %d\n\n", d)
 		docID := fmt.Sprintf("doc-%d", d)
 		starts := make([]int, count)
 		for c := 0; c < count; c++ {
 			starts[c] = text.Len()
-			text.WriteString(fmt.Sprintf("chunk %d of document %d. ", c, d))
+			fmt.Fprintf(&text, "chunk %d of document %d. ", c, d)
 		}
 		document := rag.Document{ID: docID, Title: fmt.Sprintf("Doc %d", d), Text: text.String()}
 		documents = append(documents, document)
