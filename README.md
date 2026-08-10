@@ -21,6 +21,7 @@ ragkit/
   rag/indexbundle      immutable content-addressed bundles (atomic publication)
   rag/retrieval        collapse, weighted RRF fusion, hydration, filters
   rag/reranking        term-overlap + cached reranker decorator
+  rag/provider/geppetto validated Geppetto embedding/reranking adapters
   rag/generation       generation caching/observation + flow adapters
   rag/answering        retrieval strategies (bm25/vector/rrf/rrf-reranked/
                        multi-query/hyde), context policy, grounded-answer contract
@@ -48,18 +49,38 @@ Changes relative to rag-ttc:
 - The grounded-answer contract kind is injectable via
   `answering.Service.ContractKind` (default `ttc-grounded-answer-v1`).
 - Dataset tests use self-contained fixtures instead of the TTC corpora.
-- A boundary test forbids geppetto/pinocchio/glazed/cobra/bubbletea anywhere
-  outside a future `providers/` adapter tree. Provider adapters were
-  deliberately not extracted in wave 1; consumers bring their own.
+- A boundary test forbids geppetto/pinocchio/glazed/cobra/bubbletea in the
+  ragkit core. The explicit `rag/provider/...` adapter tree is the only place
+  model-framework dependencies may enter; CLI frameworks remain forbidden.
+- `rag/provider/geppetto` wraps already-configured providers. Applications keep
+  deployment settings, task prefixes, candidate rendering, cache policy, and
+  artifact identity; ragkit validates and projects provider responses.
 
 Extraction is a cache epoch: `execution` cache keys are semantically
 compatible with upstream, but no attempt is made to share cache directories
 with rag-ttc installations.
 
+## Opinionated Geppetto adapters
+
+```go
+import raggeppetto "github.com/go-go-golems/ragkit/rag/provider/geppetto"
+
+embedder, err := raggeppetto.NewEmbedder(embeddingProvider)
+reranker, err := raggeppetto.NewReranker(rerankProvider)
+```
+
+The constructors accept providers configured by the application. They add no
+endpoints, credentials, model defaults, task prefixes, document formatting, or
+cache policy. This keeps the dependency direction strict:
+
+```text
+application → ragkit/rag/provider/geppetto → Geppetto
+```
+
 ## Development
 
 ```bash
-go build ./... && go test ./... -count=1
+make ci-check
 ```
 
 ## License
