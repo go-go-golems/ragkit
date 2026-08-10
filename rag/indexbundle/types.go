@@ -65,7 +65,29 @@ type BuildInput struct {
 	QueryEmbedder   rag.Embedder
 	Chunker         ChunkerIdentity
 	Embedding       *VectorIdentity
+	// ObserveStage receives synchronous build-boundary notifications. It is
+	// intended for diagnostics such as memory and duration telemetry; observers
+	// must return quickly and must not mutate BuildInput values.
+	ObserveStage func(BuildStage)
 }
+
+// BuildStage identifies a completed, externally meaningful bundle-build
+// boundary. Values are stable log/telemetry identifiers rather than display
+// strings.
+type BuildStage string
+
+const (
+	BuildStageInputValidated   BuildStage = "input_validated"
+	BuildStageIdentityPlanned  BuildStage = "identity_planned"
+	BuildStageExistingVerified BuildStage = "existing_verified"
+	BuildStageTemporaryCreated BuildStage = "temporary_created"
+	BuildStagePayloadsWritten  BuildStage = "payloads_written"
+	BuildStageLexicalBuilt     BuildStage = "lexical_built"
+	BuildStageVectorBuilt      BuildStage = "vector_built"
+	BuildStageManifestWritten  BuildStage = "manifest_written"
+	BuildStageBundlePublished  BuildStage = "bundle_published"
+	BuildStageResultMeasured   BuildStage = "result_measured"
+)
 
 type BuildResult struct {
 	Manifest    Manifest `json:"manifest"`

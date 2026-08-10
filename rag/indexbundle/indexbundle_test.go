@@ -96,6 +96,38 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 	require.NoError(t, bundle.Close(), "close must be idempotent")
 }
 
+func TestBuildReportsCompletedStageBoundaries(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	var stages []BuildStage
+	input.ObserveStage = func(stage BuildStage) {
+		stages = append(stages, stage)
+	}
+
+	_, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, []BuildStage{
+		BuildStageInputValidated,
+		BuildStageIdentityPlanned,
+		BuildStageTemporaryCreated,
+		BuildStagePayloadsWritten,
+		BuildStageLexicalBuilt,
+		BuildStageVectorBuilt,
+		BuildStageManifestWritten,
+		BuildStageBundlePublished,
+		BuildStageResultMeasured,
+	}, stages)
+
+	stages = nil
+	_, err = Build(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, []BuildStage{
+		BuildStageInputValidated,
+		BuildStageIdentityPlanned,
+		BuildStageExistingVerified,
+		BuildStageResultMeasured,
+	}, stages)
+}
+
 func TestBuildRejectsReuseForDifferentCorpusPath(t *testing.T) {
 	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
 	_, err := Build(t.Context(), input)

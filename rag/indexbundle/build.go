@@ -30,6 +30,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err := validateBuildInput(input); err != nil {
 		return BuildResult{}, err
 	}
+	observeStage(input, BuildStageInputValidated)
 	lexicalTemplate := BackendIdentity{
 		Backend: "bleve-bm25", Version: bleveindex.ManifestVersion, Channel: "bm25",
 		TitleBoost: 2, BodyBoost: 1,
@@ -69,6 +70,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		Chunker: input.Chunker, RepresentationKinds: kinds,
 		Lexical: lexicalTemplate, Vector: vectorIdentity,
 	}
+	observeStage(input, BuildStageIdentityPlanned)
 	finalPath := filepath.Join(input.OutputRoot, bundleID)
 	if _, statErr := os.Stat(finalPath); statErr == nil {
 		existingState, loadErr := loadVerifiedManifest(ctx, finalPath)
@@ -95,7 +97,8 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		if _, validateErr := loadVerifiedData(ctx, chunks); validateErr != nil {
 			return BuildResult{}, errors.Wrap(validateErr, "existing bundle identity is invalid")
 		}
-		return measureResult(ctx, finalPath, existing, true)
+		observeStage(input, BuildStageExistingVerified)
+		return measureObservedResult(ctx, input, finalPath, existing, true)
 	} else if !os.IsNotExist(statErr) {
 		return BuildResult{}, errors.Wrap(statErr, "inspect bundle destination")
 	}
@@ -106,6 +109,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, errors.Wrap(err, "create temporary bundle")
 	}
+	observeStage(input, BuildStageTemporaryCreated)
 	published := false
 	defer func() {
 		if !published {
@@ -118,6 +122,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err := writeJSON(ctx, filepath.Join(temporary, representationsName), input.Representations); err != nil {
 		return BuildResult{}, err
 	}
+	observeStage(input, BuildStagePayloadsWritten)
 	lexical, lexicalManifest, err := bleveindex.Build(ctx, bleveindex.Config{
 		Path: filepath.Join(temporary, bleveName), Channel: "bm25",
 	}, input.Documents, input.Chunks, input.Representations)
@@ -127,6 +132,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err := lexical.Close(); err != nil {
 		return BuildResult{}, errors.Wrap(err, "close bundle lexical index")
 	}
+	observeStage(input, BuildStageLexicalBuilt)
 	manifest.Lexical = lexicalIdentity(lexicalManifest)
 	if manifest.Lexical.ContentDigest != lexicalTemplate.ContentDigest {
 		return BuildResult{}, errors.New("built lexical content digest differs from planned identity")
@@ -149,10 +155,12 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		if persisted.ContentDigest != vectorIdentity.ContentDigest {
 			return BuildResult{}, errors.New("built vector content digest differs from planned identity")
 		}
+		observeStage(input, BuildStageVectorBuilt)
 	}
 	if err := writeJSON(ctx, filepath.Join(temporary, manifestName), manifest); err != nil {
 		return BuildResult{}, err
 	}
+	observeStage(input, BuildStageManifestWritten)
 	if err := fsutil.SyncDirectory(temporary); err != nil {
 		return BuildResult{}, errors.Wrap(err, "sync temporary bundle")
 	}
@@ -160,10 +168,25 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		return BuildResult{}, errors.Wrap(err, "publish bundle")
 	}
 	published = true
+	observeStage(input, BuildStageBundlePublished)
 	if err := fsutil.SyncDirectory(input.OutputRoot); err != nil {
 		return BuildResult{}, errors.Wrap(err, "sync bundle output root")
 	}
-	return measureResult(ctx, finalPath, manifest, false)
+	return measureObservedResult(ctx, input, finalPath, manifest, false)
+}
+
+func observeStage(input BuildInput, stage BuildStage) {
+	if input.ObserveStage != nil {
+		input.ObserveStage(stage)
+	}
+}
+
+func measureObservedResult(ctx context.Context, input BuildInput, path string, manifest Manifest, reused bool) (BuildResult, error) {
+	result, err := measureResult(ctx, path, manifest, reused)
+	if err == nil {
+		observeStage(input, BuildStageResultMeasured)
+	}
+	return result, err
 }
 
 func validateBuildInput(input BuildInput) error {
