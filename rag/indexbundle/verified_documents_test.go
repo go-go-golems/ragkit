@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/embedding"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,6 +61,22 @@ func TestLoadVerifiedDocumentsLoadsManifestCorpusUnderRoot(t *testing.T) {
 	loaded, err := LoadVerifiedDocuments(t.Context(), bundlePath, root)
 	require.NoError(t, err)
 	require.Equal(t, documents, loaded)
+}
+
+func TestLoadVerifiedDocumentsWhileBundleIsOpen(t *testing.T) {
+	root, bundlePath, _ := verifiedDocumentsFixture(t)
+	bundle, err := Open(t.Context(), OpenOptions{
+		Path: bundlePath, QueryEmbedder: &embedding.HashEmbedder{Dimensions: 16},
+		EmbeddingProvider: "hash", EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+	})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer func() { _ = bundle.Close() }()
+
+	if _, err := LoadVerifiedDocuments(t.Context(), bundlePath, root); err != nil {
+		t.Fatalf("LoadVerifiedDocuments() with open bundle error = %v", err)
+	}
 }
 
 func TestLoadVerifiedDocumentsRejectsTamperedManifestIdentity(t *testing.T) {

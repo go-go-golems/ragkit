@@ -147,6 +147,21 @@ func loadVerifiedChunks(ctx context.Context, state verifiedManifest) (verifiedCh
 }
 
 func loadVerifiedData(ctx context.Context, state verifiedChunks) (verifiedData, error) {
+	verified, err := loadVerifiedStoredData(ctx, state)
+	if err != nil {
+		return verifiedData{}, err
+	}
+	if err := validateBackendIdentity(ctx, verified); err != nil {
+		return verifiedData{}, err
+	}
+	return verified, nil
+}
+
+// loadVerifiedStoredData validates the manifest, chunks, representations, and
+// their content-derived bundle identity without opening either search backend.
+// Callers that only need source lineage can therefore run while a serving
+// Bundle already owns the backend's process-local/exclusive file lock.
+func loadVerifiedStoredData(ctx context.Context, state verifiedChunks) (verifiedData, error) {
 	if err := ctx.Err(); err != nil {
 		return verifiedData{}, err
 	}
@@ -166,9 +181,6 @@ func loadVerifiedData(ctx context.Context, state verifiedChunks) (verifiedData, 
 		return verifiedData{}, err
 	}
 	verified := verifiedData{verifiedChunks: state, representations: representations}
-	if err := validateBackendIdentity(ctx, verified); err != nil {
-		return verifiedData{}, err
-	}
 	if err := validateStoredIdentity(verified); err != nil {
 		return verifiedData{}, err
 	}

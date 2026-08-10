@@ -20,12 +20,20 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	verified, err := loadVerifiedBundle(ctx, bundlePath)
+	manifest, err := loadVerifiedManifest(ctx, bundlePath)
 	if err != nil {
 		return nil, errors.Wrap(err, "verify index bundle data")
 	}
-	manifest := verified.manifest
-	corpusPath, err := resolveVerifiedCorpusPath(corpusRoot, manifest.CorpusPath)
+	chunks, err := loadVerifiedChunks(ctx, manifest)
+	if err != nil {
+		return nil, errors.Wrap(err, "verify index bundle data")
+	}
+	verified, err := loadVerifiedStoredData(ctx, chunks)
+	if err != nil {
+		return nil, errors.Wrap(err, "verify index bundle data")
+	}
+	bundleManifest := verified.manifest
+	corpusPath, err := resolveVerifiedCorpusPath(corpusRoot, bundleManifest.CorpusPath)
 	if err != nil {
 		return nil, err
 	}
@@ -40,8 +48,8 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	if err != nil {
 		return nil, errors.Wrap(err, "decode index bundle source corpus")
 	}
-	if len(documents) != manifest.DocumentCount {
-		return nil, errors.Errorf("source corpus has %d documents but bundle manifest records %d", len(documents), manifest.DocumentCount)
+	if len(documents) != bundleManifest.DocumentCount {
+		return nil, errors.Errorf("source corpus has %d documents but bundle manifest records %d", len(documents), bundleManifest.DocumentCount)
 	}
 	seen := make(map[string]struct{}, len(documents))
 	for _, document := range documents {
@@ -58,8 +66,8 @@ func LoadVerifiedDocuments(ctx context.Context, bundlePath, corpusRoot string) (
 	if err != nil {
 		return nil, errors.Wrap(err, "digest index bundle source corpus")
 	}
-	if actualDigest != manifest.CorpusDigest {
-		return nil, errors.Errorf("source corpus digest %q differs from bundle manifest digest %q", actualDigest, manifest.CorpusDigest)
+	if actualDigest != bundleManifest.CorpusDigest {
+		return nil, errors.Errorf("source corpus digest %q differs from bundle manifest digest %q", actualDigest, bundleManifest.CorpusDigest)
 	}
 	if err := rag.ValidateCorpus(documents, verified.chunks); err != nil {
 		return nil, errors.Wrap(err, "validate source corpus lineage")
