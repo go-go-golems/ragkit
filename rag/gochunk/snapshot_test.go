@@ -68,6 +68,10 @@ func TestCommittedReadsUseTheResolvedCommit(t *testing.T) {
 	runGit(t, repository, "config", "user.name", "Fixture")
 	runGit(t, repository, "add", ".")
 	runGit(t, repository, "commit", "-qm", "old")
+	// Git hooks export repository-local variables. They must not override the
+	// explicit fixture repository selected by -C.
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), ".git"))
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
 	head, err := repositoryHead(context.Background(), "fixture", repository)
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +104,7 @@ func writeFixture(t *testing.T, path, body string) {
 func runGit(t *testing.T, repository string, arguments ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", repository}, arguments...)...)
+	command.Env = isolatedGitEnvironment()
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", arguments, err, output)
 	}

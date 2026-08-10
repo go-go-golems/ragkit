@@ -215,6 +215,7 @@ func documentDigests(documents []rag.Document) []string {
 func gitOutput(ctx context.Context, repository string, arguments ...string) ([]byte, error) {
 	commandArguments := append([]string{"-C", repository}, arguments...)
 	command := exec.CommandContext(ctx, "git", commandArguments...)
+	command.Env = isolatedGitEnvironment()
 	output, err := command.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -223,4 +224,35 @@ func gitOutput(ctx context.Context, repository string, arguments ...string) ([]b
 		return nil, errors.Wrap(err, "execute git")
 	}
 	return output, nil
+}
+
+// isolatedGitEnvironment removes repository-local variables exported by Git
+// hooks. Without this, an inherited GIT_DIR or GIT_WORK_TREE overrides -C and
+// can make a command intended for a fixture operate on the caller repository.
+func isolatedGitEnvironment() []string {
+	local := map[string]struct{}{
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES": {},
+		"GIT_CONFIG":                       {},
+		"GIT_CONFIG_PARAMETERS":            {},
+		"GIT_CONFIG_COUNT":                 {},
+		"GIT_OBJECT_DIRECTORY":             {},
+		"GIT_DIR":                          {},
+		"GIT_WORK_TREE":                    {},
+		"GIT_IMPLICIT_WORK_TREE":           {},
+		"GIT_GRAFT_FILE":                   {},
+		"GIT_INDEX_FILE":                   {},
+		"GIT_NO_REPLACE_OBJECTS":           {},
+		"GIT_REPLACE_REF_BASE":             {},
+		"GIT_PREFIX":                       {},
+		"GIT_SHALLOW_FILE":                 {},
+		"GIT_COMMON_DIR":                   {},
+	}
+	environment := make([]string, 0, len(os.Environ()))
+	for _, item := range os.Environ() {
+		name, _, _ := strings.Cut(item, "=")
+		if _, remove := local[name]; !remove {
+			environment = append(environment, item)
+		}
+	}
+	return environment
 }
