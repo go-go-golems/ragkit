@@ -6,10 +6,61 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
 )
+
+func TestBuildRecordsMatchesEagerManifestAndFailsClosed(t *testing.T) {
+	documents, chunks, representations := fixture()
+	eager, want, err := Build(t.Context(), Config{Path: filepath.Join(t.TempDir(), "eager")}, documents, chunks, representations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireClose(t, eager)
+	records := []Record{
+		{RepresentationID: "rep-oak", ChunkID: "chunk-oak", DocumentID: "doc-oak", Kind: "raw", Title: "Oak planting", Body: chunks[0].Text},
+		{RepresentationID: "rep-maple", ChunkID: "chunk-maple", DocumentID: "doc-maple", Kind: "raw", Title: "Maple color", Body: chunks[1].Text},
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].RepresentationID < records[j].RepresentationID })
+	streamed, got, err := BuildRecords(t.Context(), Config{Path: filepath.Join(t.TempDir(), "streamed"), BatchSize: 1}, len(records), recordProducer(records))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireClose(t, streamed)
+	if got != want {
+		t.Fatalf("streamed manifest = %#v, want %#v", got, want)
+	}
+
+	_, _, err = BuildRecords(t.Context(), Config{Path: filepath.Join(t.TempDir(), "unordered")}, len(records), recordProducer([]Record{records[1], records[0]}))
+	if err == nil || !strings.Contains(err.Error(), "strictly increasing") {
+		t.Fatalf("unordered error = %v", err)
+	}
+	_, _, err = BuildRecords(t.Context(), Config{Path: filepath.Join(t.TempDir(), "short")}, len(records)+1, recordProducer(records))
+	if err == nil || !strings.Contains(err.Error(), "expected") {
+		t.Fatalf("short producer error = %v", err)
+	}
+}
+
+func recordProducer(records []Record) func(func(Record) error) error {
+	return func(yield func(Record) error) error {
+		for _, current := range records {
+			if err := yield(current); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func requireClose(t *testing.T, index *Index) {
+	t.Helper()
+	if err := index.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestBuildSearchReopen(t *testing.T) {
 	t.Parallel()
