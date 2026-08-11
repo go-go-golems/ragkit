@@ -107,6 +107,28 @@ const (
 	BuildStageResultMeasured   BuildStage = "result_measured"
 )
 
+// VerifyStage identifies a completed, externally meaningful existing-bundle
+// verification boundary. Values are stable telemetry identifiers.
+type VerifyStage string
+
+const (
+	VerifyStageManifest        VerifyStage = "manifest"
+	VerifyStageChunks          VerifyStage = "chunks"
+	VerifyStageRepresentations VerifyStage = "representations"
+	VerifyStageLexical         VerifyStage = "lexical"
+	VerifyStageVector          VerifyStage = "vector"
+	VerifyStageComplete        VerifyStage = "complete"
+)
+
+// VerifyOptions runs the same fail-closed validation used before BuildStream
+// reuses an immutable bundle. Expected values are optional additional bounds.
+type VerifyOptions struct {
+	Path               string
+	ExpectedBundleID   string
+	ExpectedCorpusPath string
+	ObserveStage       func(VerifyStage)
+}
+
 type BuildResult struct {
 	Manifest    Manifest `json:"manifest"`
 	Path        string   `json:"path"`

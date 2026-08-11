@@ -229,6 +229,13 @@ func validateStoredIdentity(data verifiedData) error {
 }
 
 func validateBackendIdentity(ctx context.Context, data verifiedData) error {
+	if err := validateLexicalBackendIdentity(ctx, data); err != nil {
+		return err
+	}
+	return validateVectorBackendIdentity(ctx, data)
+}
+
+func validateLexicalBackendIdentity(ctx context.Context, data verifiedData) error {
 	manifest := data.manifest
 	path := data.path
 	bleveData, err := os.ReadFile(filepath.Join(path, bleveName, "rag-manifest.json"))
@@ -253,6 +260,12 @@ func validateBackendIdentity(ctx context.Context, data verifiedData) error {
 	if lexicalDigest != manifest.Lexical.ContentDigest {
 		return errors.New("bundle lexical content differs from manifest")
 	}
+	return nil
+}
+
+func validateVectorBackendIdentity(ctx context.Context, data verifiedData) error {
+	manifest := data.manifest
+	path := data.path
 	if manifest.Vector != nil {
 		if err := ctx.Err(); err != nil {
 			return err

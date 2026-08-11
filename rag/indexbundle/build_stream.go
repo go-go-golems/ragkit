@@ -200,21 +200,13 @@ func validateStreamInput(ctx context.Context, input StreamInput) error {
 }
 
 func verifyExistingStreamedBundle(ctx context.Context, path, bundleID, corpusPath string) (Manifest, error) {
-	state, err := loadVerifiedManifest(ctx, path)
+	manifest, err := Verify(ctx, VerifyOptions{
+		Path: path, ExpectedBundleID: bundleID, ExpectedCorpusPath: corpusPath,
+	})
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "existing streamed bundle is invalid")
 	}
-	if state.manifest.BundleID != bundleID || state.manifest.CorpusPath != corpusPath {
-		return Manifest{}, errors.New("existing streamed bundle identity differs from requested build")
-	}
-	chunks, err := loadVerifiedChunks(ctx, state)
-	if err != nil {
-		return Manifest{}, errors.Wrap(err, "existing streamed bundle is incomplete")
-	}
-	if _, err := loadVerifiedData(ctx, chunks); err != nil {
-		return Manifest{}, errors.Wrap(err, "existing streamed bundle data is invalid")
-	}
-	return state.manifest, nil
+	return manifest, nil
 }
 
 func observeStreamStage(input StreamInput, stage BuildStage) {
