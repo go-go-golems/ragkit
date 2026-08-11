@@ -68,6 +68,73 @@ func TestBuildSearchReopen(t *testing.T) {
 	}
 }
 
+func TestBuildEntriesMatchesEagerManifestAndFailsClosed(t *testing.T) {
+	representations := []rag.Representation{
+		{ID: "rep-a", ChunkID: "chunk-a", ContentDigest: "a"},
+		{ID: "rep-b", ChunkID: "chunk-b", ContentDigest: "b"},
+	}
+	chunks := []rag.Chunk{
+		{ID: "chunk-a", DocumentID: "doc-a"},
+		{ID: "chunk-b", DocumentID: "doc-b"},
+	}
+	vectors := []rag.Vector{
+		{RepresentationID: "rep-a", Model: "model", Values: []float32{1, 0}},
+		{RepresentationID: "rep-b", Model: "model", Values: []float32{0, 1}},
+	}
+	eagerPath := filepath.Join(t.TempDir(), "eager.sqlite")
+	eager, err := Build(t.Context(), Config{Path: eagerPath, Model: "model"}, representations, chunks, vectors, fakeEmbedder{vector: []float32{1, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want, err := Inspect(eagerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []Entry{
+		{RepresentationID: "rep-a", ChunkID: "chunk-a", DocumentID: "doc-a", Values: []float32{1, 0}, ContentDigest: "a"},
+		{RepresentationID: "rep-b", ChunkID: "chunk-b", DocumentID: "doc-b", Values: []float32{0, 1}, ContentDigest: "b"},
+	}
+	streamedPath := filepath.Join(t.TempDir(), "streamed.sqlite")
+	streamed, err := BuildEntries(t.Context(), Config{Path: streamedPath, Model: "model"}, len(entries), entryProducer(entries), fakeEmbedder{vector: []float32{1, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := streamed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Inspect(streamedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("streamed manifest = %#v, want %#v", got, want)
+	}
+
+	_, err = BuildEntries(t.Context(), Config{Path: filepath.Join(t.TempDir(), "unordered.sqlite"), Model: "model"}, len(entries), entryProducer([]Entry{entries[1], entries[0]}), fakeEmbedder{vector: []float32{1, 0}})
+	if err == nil || !strings.Contains(err.Error(), "strictly increasing") {
+		t.Fatalf("unordered error = %v", err)
+	}
+	_, err = BuildEntries(t.Context(), Config{Path: filepath.Join(t.TempDir(), "short.sqlite"), Model: "model"}, len(entries)+1, entryProducer(entries), fakeEmbedder{vector: []float32{1, 0}})
+	if err == nil || !strings.Contains(err.Error(), "expected") {
+		t.Fatalf("short producer error = %v", err)
+	}
+}
+
+func entryProducer(entries []Entry) func(func(Entry) error) error {
+	return func(yield func(Entry) error) error {
+		for _, entry := range entries {
+			if err := yield(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
 func TestSQLiteURIEncodesPathBeforeParameters(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "vectors?#.sqlite")
 	uri := sqliteURI(path, url.Values{"mode": {"ro"}})
