@@ -3,6 +3,7 @@
 package indexbundle
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -71,6 +72,21 @@ type BuildInput struct {
 	ObserveStage func(BuildStage)
 }
 
+// StreamInput builds the same immutable bundle contract as Build while
+// admitting caller data through bounded, validated batches. Produce is called
+// synchronously exactly once; it must add documents, chunks, representations,
+// and, when configured, vectors in that phase order.
+type StreamInput struct {
+	OutputRoot    string
+	CorpusPath    string
+	Chunker       ChunkerIdentity
+	Embedding     *VectorIdentity
+	QueryEmbedder rag.Embedder
+	BatchSize     int
+	Produce       func(context.Context, *Stager) error
+	ObserveStage  func(BuildStage)
+}
+
 // BuildStage identifies a completed, externally meaningful bundle-build
 // boundary. Values are stable log/telemetry identifiers rather than display
 // strings.
@@ -78,6 +94,8 @@ type BuildStage string
 
 const (
 	BuildStageInputValidated   BuildStage = "input_validated"
+	BuildStageStagingProduced  BuildStage = "staging_produced"
+	BuildStageStagingSealed    BuildStage = "staging_sealed"
 	BuildStageIdentityPlanned  BuildStage = "identity_planned"
 	BuildStageExistingVerified BuildStage = "existing_verified"
 	BuildStageTemporaryCreated BuildStage = "temporary_created"

@@ -1,12 +1,14 @@
 package indexbundle
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"math"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 
@@ -334,6 +336,32 @@ ORDER BY r.id`)
 	})
 }
 
+func (k *stagingKernel) produceLexical(ctx context.Context, yield func(bleveindex.Record) error) error {
+	if k.phase != stagingSealed {
+		return errors.New("staging relation must be sealed before reading lexical records")
+	}
+	rows, err := k.db.QueryContext(ctx, `
+SELECT r.id, r.chunk_id, c.document_id, r.kind, d.title, r.text
+FROM representation r
+JOIN chunk c ON c.id = r.chunk_id
+JOIN document d ON d.id = c.document_id
+ORDER BY r.id`)
+	if err != nil {
+		return errors.Wrap(err, "read staged lexical records")
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var record bleveindex.Record
+		if err := rows.Scan(&record.RepresentationID, &record.ChunkID, &record.DocumentID, &record.Kind, &record.Title, &record.Body); err != nil {
+			return errors.Wrap(err, "scan staged lexical record")
+		}
+		if err := yield(record); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 func (k *stagingKernel) vectorDigest(ctx context.Context) (string, error) {
 	return digest.JSONSequence(ctx, func(yield func(sqliteexact.Entry) error) error {
 		rows, err := k.db.QueryContext(ctx, `
@@ -364,6 +392,106 @@ ORDER BY r.id`)
 		}
 		return rows.Err()
 	})
+}
+
+func (k *stagingKernel) produceVectors(ctx context.Context, yield func(sqliteexact.Entry) error) error {
+	if k.phase != stagingSealed || k.spec.Embedding == nil {
+		return errors.New("sealed vector staging relation is required")
+	}
+	rows, err := k.db.QueryContext(ctx, `
+SELECT r.id, r.chunk_id, c.document_id, v.dimensions, v.values_blob, r.content_digest
+FROM vector v
+JOIN representation r ON r.id = v.representation_id
+JOIN chunk c ON c.id = r.chunk_id
+ORDER BY r.id`)
+	if err != nil {
+		return errors.Wrap(err, "read staged vector records")
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var entry sqliteexact.Entry
+		var dimensions int
+		var blob []byte
+		if err := rows.Scan(&entry.RepresentationID, &entry.ChunkID, &entry.DocumentID, &dimensions, &blob, &entry.ContentDigest); err != nil {
+			return errors.Wrap(err, "scan staged vector record")
+		}
+		values, err := decodeStagedVector(blob, dimensions)
+		if err != nil {
+			return errors.Wrapf(err, "decode staged vector record %q", entry.RepresentationID)
+		}
+		entry.Values = values
+		if err := yield(entry); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (k *stagingKernel) writeJSONArray(ctx context.Context, path, table string) error {
+	if k.phase != stagingSealed {
+		return errors.New("staging relation must be sealed before writing payloads")
+	}
+	if table != "chunk" && table != "representation" {
+		return errors.Errorf("unsupported staged payload table %q", table)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return errors.Wrap(err, "create staged JSON payload")
+	}
+	closeFile := true
+	defer func() {
+		if closeFile {
+			_ = file.Close()
+		}
+	}()
+	writer := bufio.NewWriterSize(file, 64*1024)
+	if err := writer.WriteByte('['); err != nil {
+		return errors.Wrap(err, "start staged JSON payload")
+	}
+	rows, err := k.db.QueryContext(ctx, `SELECT canonical_json FROM `+table+` ORDER BY ordinal`)
+	if err != nil {
+		return errors.Wrap(err, "read staged JSON payload")
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var encoded []byte
+		if err := rows.Scan(&encoded); err != nil {
+			return errors.Wrap(err, "scan staged JSON payload")
+		}
+		if count > 0 {
+			if err := writer.WriteByte(','); err != nil {
+				return errors.Wrap(err, "separate staged JSON payload")
+			}
+		}
+		if _, err := writer.Write(encoded); err != nil {
+			return errors.Wrap(err, "write staged JSON payload value")
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return errors.Wrap(err, "iterate staged JSON payload")
+	}
+	if err := writer.WriteByte(']'); err != nil {
+		return errors.Wrap(err, "finish staged JSON payload")
+	}
+	if err := writer.WriteByte('\n'); err != nil {
+		return errors.Wrap(err, "terminate staged JSON payload")
+	}
+	if err := writer.Flush(); err != nil {
+		return errors.Wrap(err, "flush staged JSON payload")
+	}
+	if err := file.Sync(); err != nil {
+		return errors.Wrap(err, "sync staged JSON payload")
+	}
+	if err := file.Close(); err != nil {
+		return errors.Wrap(err, "close staged JSON payload")
+	}
+	closeFile = false
+	return nil
 }
 
 func (k *stagingKernel) representationKinds(ctx context.Context) ([]string, error) {
