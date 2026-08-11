@@ -61,7 +61,8 @@ func TestBuildStreamMatchesEagerIdentityAndOpens(t *testing.T) {
 func TestBuildStreamRejectsProducerFailureWithoutPublishing(t *testing.T) {
 	eager := fixtureInput(t, filepath.Join(t.TempDir(), "unused"))
 	root := filepath.Join(t.TempDir(), "streamed")
-	input := streamFixture(eager, root, 1)
+	valid := streamFixture(eager, root, 1)
+	input := valid
 	input.Produce = func(ctx context.Context, stager *Stager) error {
 		return errors.New("producer stopped")
 	}
@@ -70,6 +71,11 @@ func TestBuildStreamRejectsProducerFailureWithoutPublishing(t *testing.T) {
 	entries, readErr := os.ReadDir(root)
 	require.NoError(t, readErr)
 	require.Empty(t, entries)
+
+	recovered, err := BuildStream(t.Context(), valid)
+	require.NoError(t, err)
+	require.False(t, recovered.Reused)
+	require.DirExists(t, recovered.Path)
 }
 
 func streamFixture(eager BuildInput, outputRoot string, batchSize int) StreamInput {
