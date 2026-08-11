@@ -304,7 +304,10 @@ func InspectContentDigest(path string) (string, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return "", errors.Wrap(err, "decode Bleve manifest")
 	}
-	index, err := blevelib.OpenUsing(path, map[string]interface{}{"bolt_timeout": "3s"})
+	index, err := blevelib.OpenUsing(path, map[string]interface{}{
+		"bolt_timeout": "3s",
+		"read_only":    true,
+	})
 	if err != nil {
 		return "", errors.Wrap(err, "open Bleve index for content inspection")
 	}
