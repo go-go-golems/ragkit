@@ -7,9 +7,13 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"sort"
 	"strings"
 
+	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
+	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
+	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	vectorutil "github.com/go-go-golems/ragkit/vector"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
@@ -27,7 +31,21 @@ const (
 
 type stagingSpec struct {
 	BatchSize int
+	Chunker   ChunkerIdentity
 	Embedding *VectorIdentity
+}
+
+type buildPlan struct {
+	BundleID             string
+	CorpusDigest         string
+	ChunkDigest          string
+	RepresentationDigest string
+	RepresentationKinds  []string
+	DocumentCount        int
+	ChunkCount           int
+	RepresentationCount  int
+	Lexical              BackendIdentity
+	Vector               *VectorIdentity
 }
 
 // Stager is the bounded, fail-closed input boundary used by BuildStream.
@@ -77,6 +95,7 @@ func openStagingKernel(ctx context.Context, path string, spec stagingSpec) (*sta
 CREATE TABLE document (
  id TEXT PRIMARY KEY,
  ordinal INTEGER NOT NULL UNIQUE,
+	 title TEXT NOT NULL,
  canonical_json BLOB NOT NULL
 );
 CREATE TABLE chunk (
@@ -134,7 +153,7 @@ func (k *stagingKernel) addDocuments(ctx context.Context, batch []rag.Document) 
 			_ = tx.Rollback()
 			return errors.Wrap(err, "encode staged document")
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO document VALUES (?, ?, ?)`, document.ID, start+index, encoded); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO document VALUES (?, ?, ?, ?)`, document.ID, start+index, document.Title, encoded); err != nil {
 			_ = tx.Rollback()
 			return errors.Wrapf(err, "stage document %q", document.ID)
 		}
@@ -165,6 +184,10 @@ func (k *stagingKernel) addChunks(ctx context.Context, batch []rag.Chunk) error 
 			_ = tx.Rollback()
 			return errors.Errorf("chunk %q has negative ordinal %d", chunk.ID, chunk.Ordinal)
 		}
+		if chunk.Chunker != k.spec.Chunker.Name {
+			_ = tx.Rollback()
+			return errors.Errorf("chunk %q uses chunker %q but staging declares %q", chunk.ID, chunk.Chunker, k.spec.Chunker.Name)
+		}
 		if err := rag.ValidateChunk(document, chunk); err != nil {
 			_ = tx.Rollback()
 			return errors.Wrap(err, "validate staged chunk")
@@ -185,6 +208,183 @@ func (k *stagingKernel) addChunks(ctx context.Context, batch []rag.Chunk) error 
 	k.chunks += len(batch)
 	k.phase = stagingChunks
 	return nil
+}
+
+func (k *stagingKernel) seal(ctx context.Context) (buildPlan, error) {
+	if err := ctx.Err(); err != nil {
+		return buildPlan{}, err
+	}
+	wantPhase := stagingRepresentations
+	if k.spec.Embedding != nil {
+		wantPhase = stagingVectors
+	}
+	if k.phase != wantPhase || k.documents == 0 || k.chunks == 0 || k.reps == 0 {
+		return buildPlan{}, errors.Errorf("cannot seal incomplete staging relation in phase %d", k.phase)
+	}
+	if k.spec.Embedding != nil && k.vectors != k.reps {
+		return buildPlan{}, errors.Errorf("staged vector count %d differs from representation count %d", k.vectors, k.reps)
+	}
+
+	corpusDigest, err := stagedCanonicalDigest[rag.Document](ctx, k.db, "document")
+	if err != nil {
+		return buildPlan{}, errors.Wrap(err, "digest staged corpus")
+	}
+	chunkDigest, err := stagedCanonicalDigest[rag.Chunk](ctx, k.db, "chunk")
+	if err != nil {
+		return buildPlan{}, errors.Wrap(err, "digest staged chunks")
+	}
+	representationDigest, err := stagedCanonicalDigest[rag.Representation](ctx, k.db, "representation")
+	if err != nil {
+		return buildPlan{}, errors.Wrap(err, "digest staged representations")
+	}
+	lexicalDigest, err := k.lexicalDigest(ctx)
+	if err != nil {
+		return buildPlan{}, errors.Wrap(err, "digest staged lexical records")
+	}
+	lexical := BackendIdentity{
+		Backend: "bleve-bm25", Version: bleveindex.ManifestVersion, Channel: "bm25",
+		TitleBoost: 2, BodyBoost: 1, ContentDigest: lexicalDigest,
+	}
+	kinds, err := k.representationKinds(ctx)
+	if err != nil {
+		return buildPlan{}, err
+	}
+	vector := cloneVectorIdentity(k.spec.Embedding)
+	if vector != nil {
+		vector.RepresentationDigest = representationDigest
+		vector.ContentDigest, err = k.vectorDigest(ctx)
+		if err != nil {
+			return buildPlan{}, errors.Wrap(err, "digest staged vector records")
+		}
+	}
+	bundleID, err := calculateIDFromDigests(
+		corpusDigest, chunkDigest, representationDigest, kinds, k.spec.Chunker, lexical, vector,
+	)
+	if err != nil {
+		return buildPlan{}, err
+	}
+	k.phase = stagingSealed
+	return buildPlan{
+		BundleID: bundleID, CorpusDigest: corpusDigest, ChunkDigest: chunkDigest,
+		RepresentationDigest: representationDigest, RepresentationKinds: kinds,
+		DocumentCount: k.documents, ChunkCount: k.chunks, RepresentationCount: k.reps,
+		Lexical: lexical, Vector: vector,
+	}, nil
+}
+
+func stagedCanonicalDigest[T any](ctx context.Context, db *sql.DB, table string) (string, error) {
+	if table != "document" && table != "chunk" && table != "representation" {
+		return "", errors.Errorf("unsupported staged digest table %q", table)
+	}
+	return digest.JSONSequence(ctx, func(yield func(T) error) error {
+		rows, err := db.QueryContext(ctx, `SELECT canonical_json FROM `+table+` ORDER BY ordinal`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var encoded []byte
+			if err := rows.Scan(&encoded); err != nil {
+				return err
+			}
+			var value T
+			if err := json.Unmarshal(encoded, &value); err != nil {
+				return err
+			}
+			if err := yield(value); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	})
+}
+
+type stagedLexicalRecord struct {
+	RepresentationID string `json:"representation_id"`
+	ChunkID          string `json:"chunk_id"`
+	DocumentID       string `json:"document_id"`
+	Kind             string `json:"kind"`
+	Title            string `json:"title"`
+	Body             string `json:"body"`
+}
+
+func (k *stagingKernel) lexicalDigest(ctx context.Context) (string, error) {
+	return digest.JSONSequence(ctx, func(yield func(stagedLexicalRecord) error) error {
+		rows, err := k.db.QueryContext(ctx, `
+SELECT r.id, r.chunk_id, c.document_id, r.kind,
+       d.title, r.text
+FROM representation r
+JOIN chunk c ON c.id = r.chunk_id
+JOIN document d ON d.id = c.document_id
+ORDER BY r.id`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var record stagedLexicalRecord
+			if err := rows.Scan(&record.RepresentationID, &record.ChunkID, &record.DocumentID, &record.Kind, &record.Title, &record.Body); err != nil {
+				return err
+			}
+			if err := yield(record); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	})
+}
+
+func (k *stagingKernel) vectorDigest(ctx context.Context) (string, error) {
+	return digest.JSONSequence(ctx, func(yield func(sqliteexact.Entry) error) error {
+		rows, err := k.db.QueryContext(ctx, `
+SELECT r.id, r.chunk_id, c.document_id, v.dimensions, v.values_blob, r.content_digest
+FROM vector v
+JOIN representation r ON r.id = v.representation_id
+JOIN chunk c ON c.id = r.chunk_id
+ORDER BY r.id`)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var entry sqliteexact.Entry
+			var dimensions int
+			var blob []byte
+			if err := rows.Scan(&entry.RepresentationID, &entry.ChunkID, &entry.DocumentID, &dimensions, &blob, &entry.ContentDigest); err != nil {
+				return err
+			}
+			values, err := decodeStagedVector(blob, dimensions)
+			if err != nil {
+				return err
+			}
+			entry.Values = values
+			if err := yield(entry); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	})
+}
+
+func (k *stagingKernel) representationKinds(ctx context.Context) ([]string, error) {
+	rows, err := k.db.QueryContext(ctx, `SELECT DISTINCT kind FROM representation ORDER BY kind`)
+	if err != nil {
+		return nil, errors.Wrap(err, "read staged representation kinds")
+	}
+	defer func() { _ = rows.Close() }()
+	var kinds []string
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			return nil, errors.Wrap(err, "scan staged representation kind")
+		}
+		kinds = append(kinds, kind)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.Wrap(err, "iterate staged representation kinds")
+	}
+	sort.Strings(kinds)
+	return kinds, nil
 }
 
 func (k *stagingKernel) addRepresentations(ctx context.Context, batch []rag.Representation) error {
@@ -318,4 +518,15 @@ func encodeStagedVector(values []float32) []byte {
 		binary.LittleEndian.PutUint32(encoded[index*4:], math.Float32bits(value))
 	}
 	return encoded
+}
+
+func decodeStagedVector(encoded []byte, dimensions int) ([]float32, error) {
+	if dimensions < 1 || len(encoded) != dimensions*4 {
+		return nil, errors.Errorf("invalid staged vector blob length %d for %d dimensions", len(encoded), dimensions)
+	}
+	values := make([]float32, dimensions)
+	for index := range values {
+		values[index] = math.Float32frombits(binary.LittleEndian.Uint32(encoded[index*4:]))
+	}
+	return values, nil
 }

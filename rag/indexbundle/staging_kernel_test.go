@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
+	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
+	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +27,43 @@ func TestStagingKernelAdmitsBoundedValidatedRelations(t *testing.T) {
 	var blob []byte
 	require.NoError(t, kernel.db.QueryRow(`SELECT values_blob FROM vector WHERE representation_id = ?`, representation.ID).Scan(&blob))
 	require.Equal(t, encodeStagedVector([]float32{1, 2}), blob, "staging must not retain caller-owned vector memory")
+}
+
+func TestStagingKernelSealMatchesEagerIdentity(t *testing.T) {
+	document, chunk, representation, vector := stagingFixtures()
+	kernel := openFixtureKernel(t, 2)
+	require.NoError(t, kernel.addDocuments(t.Context(), []rag.Document{document}))
+	require.NoError(t, kernel.addChunks(t.Context(), []rag.Chunk{chunk}))
+	require.NoError(t, kernel.addRepresentations(t.Context(), []rag.Representation{representation}))
+	require.NoError(t, kernel.addVectors(t.Context(), []rag.Vector{vector}))
+
+	plan, err := kernel.seal(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, stagingSealed, kernel.phase)
+
+	lexicalDigest, err := bleveDigestFixture([]rag.Document{document}, []rag.Chunk{chunk}, []rag.Representation{representation})
+	require.NoError(t, err)
+	vectorDigest, err := sqliteDigestFixture([]rag.Representation{representation}, []rag.Chunk{chunk}, []rag.Vector{vector})
+	require.NoError(t, err)
+	lexical := BackendIdentity{
+		Backend: "bleve-bm25", Version: 3, Channel: "bm25", TitleBoost: 2, BodyBoost: 1,
+		ContentDigest: lexicalDigest,
+	}
+	embedding := cloneVectorIdentity(kernel.spec.Embedding)
+	embedding.ContentDigest = vectorDigest
+	wantID, wantCorpus, wantChunks, wantRepresentations, wantKinds, err := CalculateID(
+		[]rag.Document{document}, []rag.Chunk{chunk}, []rag.Representation{representation},
+		kernel.spec.Chunker, lexical, embedding,
+	)
+	require.NoError(t, err)
+	require.Equal(t, wantID, plan.BundleID)
+	require.Equal(t, wantCorpus, plan.CorpusDigest)
+	require.Equal(t, wantChunks, plan.ChunkDigest)
+	require.Equal(t, wantRepresentations, plan.RepresentationDigest)
+	require.Equal(t, wantKinds, plan.RepresentationKinds)
+	require.Equal(t, vectorDigest, plan.Vector.ContentDigest)
+
+	require.ErrorContains(t, kernel.addVectors(t.Context(), []rag.Vector{vector}), "transition")
 }
 
 func TestStagingKernelFailsClosed(t *testing.T) {
@@ -72,6 +111,16 @@ func TestStagingKernelFailsClosed(t *testing.T) {
 		require.Equal(t, stagingRepresentations, kernel.phase)
 	})
 
+	t.Run("incomplete seal", func(t *testing.T) {
+		document, chunk, representation, _ := stagingFixtures()
+		kernel := openFixtureKernel(t, 2)
+		require.NoError(t, kernel.addDocuments(t.Context(), []rag.Document{document}))
+		require.NoError(t, kernel.addChunks(t.Context(), []rag.Chunk{chunk}))
+		require.NoError(t, kernel.addRepresentations(t.Context(), []rag.Representation{representation}))
+		_, err := kernel.seal(t.Context())
+		require.ErrorContains(t, err, "incomplete")
+	})
+
 	t.Run("cancellation", func(t *testing.T) {
 		document, _, _, _ := stagingFixtures()
 		kernel := openFixtureKernel(t, 2)
@@ -85,11 +134,23 @@ func openFixtureKernel(t *testing.T, batchSize int) *stagingKernel {
 	t.Helper()
 	kernel, err := openStagingKernel(t.Context(), filepath.Join(t.TempDir(), "staging.sqlite"), stagingSpec{
 		BatchSize: batchSize,
-		Embedding: &VectorIdentity{Model: "fixture", Dimensions: 2},
+		Chunker:   ChunkerIdentity{Name: "fixture", MaximumRunes: 100},
+		Embedding: &VectorIdentity{
+			Backend: "sqlite-exact", Version: 1, Channel: "vector", Provider: "fixture",
+			Model: "fixture", Dimensions: 2,
+		},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, kernel.close()) })
 	return kernel
+}
+
+func bleveDigestFixture(documents []rag.Document, chunks []rag.Chunk, representations []rag.Representation) (string, error) {
+	return bleveindex.CalculateContentDigest(documents, chunks, representations)
+}
+
+func sqliteDigestFixture(representations []rag.Representation, chunks []rag.Chunk, vectors []rag.Vector) (string, error) {
+	return sqliteexact.CalculateContentDigest(representations, chunks, vectors)
 }
 
 func stagingFixtures() (rag.Document, rag.Chunk, rag.Representation, rag.Vector) {
