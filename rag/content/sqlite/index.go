@@ -116,6 +116,9 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
+	if err := writeIdentity(ctx, db, identity); err != nil {
+		return BuildResult{}, err
+	}
 	if err := db.Close(); err != nil {
 		return BuildResult{}, errors.Wrap(err, "close built content database")
 	}
@@ -180,6 +183,26 @@ CREATE TABLE chunk (
 CREATE INDEX chunk_document ON chunk(document_id);`)
 	if err != nil {
 		return errors.Wrap(err, "create content schema")
+	}
+	return nil
+}
+
+func writeIdentity(ctx context.Context, db *sql.DB, identity Identity) error {
+	if _, err := db.ExecContext(ctx, `
+CREATE TABLE content_identity (
+ id INTEGER PRIMARY KEY CHECK (id = 1),
+ backend TEXT NOT NULL,
+ version INTEGER NOT NULL,
+ document_count INTEGER NOT NULL,
+ chunk_count INTEGER NOT NULL,
+ document_digest TEXT NOT NULL,
+ chunk_digest TEXT NOT NULL,
+ content_digest TEXT NOT NULL
+) WITHOUT ROWID;
+INSERT INTO content_identity VALUES (1, ?, ?, ?, ?, ?, ?, ?);`,
+		identity.Backend, identity.Version, identity.DocumentCount, identity.ChunkCount,
+		identity.DocumentDigest, identity.ChunkDigest, identity.ContentDigest); err != nil {
+		return errors.Wrap(err, "write content identity")
 	}
 	return nil
 }
@@ -311,12 +334,37 @@ func Open(ctx context.Context, config Config) (*Index, Identity, error) {
 		return nil, Identity{}, err
 	}
 	index := &Index{db: db, path: config.Path, maxBatch: maxBatch}
-	identity, err := index.Inspect(ctx)
+	identity, err := index.ReadIdentity(ctx)
 	if err != nil {
 		_ = db.Close()
 		return nil, Identity{}, errors.Wrap(err, "inspect content database")
 	}
 	return index, identity, nil
+}
+
+// ReadIdentity reads the publisher's identity row without scanning payload
+// text. Serving startup uses this bounded operation; Inspect is the explicit
+// offline integrity sweep.
+func (i *Index) ReadIdentity(ctx context.Context) (Identity, error) {
+	if i == nil || i.db == nil {
+		return Identity{}, errors.New("content index is not open")
+	}
+	var identity Identity
+	if err := i.db.QueryRowContext(ctx, `
+SELECT backend, version, document_count, chunk_count,
+       document_digest, chunk_digest, content_digest
+FROM content_identity WHERE id = 1`).Scan(
+		&identity.Backend, &identity.Version, &identity.DocumentCount, &identity.ChunkCount,
+		&identity.DocumentDigest, &identity.ChunkDigest, &identity.ContentDigest); err != nil {
+		return Identity{}, errors.Wrap(err, "read content identity")
+	}
+	if identity.Backend != Backend || identity.Version != ManifestVersion ||
+		identity.DocumentCount < 1 || identity.ChunkCount < 1 ||
+		strings.TrimSpace(identity.DocumentDigest) == "" || strings.TrimSpace(identity.ChunkDigest) == "" ||
+		strings.TrimSpace(identity.ContentDigest) == "" {
+		return Identity{}, errors.New("content identity row is invalid")
+	}
+	return identity, nil
 }
 
 // Inspect verifies canonical counts and digests without retaining rows.

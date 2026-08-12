@@ -81,7 +81,7 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.NoError(t, err)
-	require.Equal(t, input.Chunks, bundle.Chunks)
+	require.NotNil(t, bundle.Content)
 	lexical, err := bundle.Lexical.Search(
 		t.Context(), rag.Query{ID: "q", Text: "lobed leaves"}, 5,
 	)

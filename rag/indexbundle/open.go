@@ -36,26 +36,23 @@ func LoadManifest(path string) (Manifest, error) {
 }
 
 func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
-	manifestState, err := loadVerifiedManifest(ctx, options.Path)
+	manifest, err := Verify(ctx, VerifyOptions{
+		Path: options.Path,
+		ObserveStage: func(stage VerifyStage) {
+			switch stage {
+			case VerifyStageManifest:
+				observeOpenStage(options.ObserveStage, OpenStageManifest)
+			case VerifyStageChunks:
+				observeOpenStage(options.ObserveStage, OpenStageChunks)
+			case VerifyStageRepresentations:
+				observeOpenStage(options.ObserveStage, OpenStageRepresentations)
+			}
+		},
+	})
 	if err != nil {
-		return nil, err
-	}
-	observeOpenStage(options.ObserveStage, OpenStageManifest)
-	chunkState, err := loadVerifiedChunks(ctx, manifestState)
-	if err != nil {
-		return nil, err
-	}
-	observeOpenStage(options.ObserveStage, OpenStageChunks)
-	verified, err := loadVerifiedStoredData(ctx, chunkState)
-	if err != nil {
-		return nil, err
-	}
-	observeOpenStage(options.ObserveStage, OpenStageRepresentations)
-	if err := validateBackendIdentity(ctx, verified); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "verify serving bundle")
 	}
 	observeOpenStage(options.ObserveStage, OpenStageBackendsVerified)
-	manifest := verified.manifest
 	// Lexical-only bundles (no vector identity) are a supported serving and
 	// rollback configuration: they open without an embedder and expose a nil
 	// Vector index.
@@ -117,9 +114,7 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 		observeOpenStage(options.ObserveStage, OpenStageVectorOpened)
 	}
 	bundle := &Bundle{
-		Manifest: manifest, Chunks: verified.chunks,
-		Representations: verified.representations,
-		Lexical:         lexical, Vector: vector, Content: contentIndex,
+		Manifest: manifest, Lexical: lexical, Vector: vector, Content: contentIndex,
 	}
 	observeOpenStage(options.ObserveStage, OpenStageReady)
 	return bundle, nil

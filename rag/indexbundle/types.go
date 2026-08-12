@@ -165,12 +165,10 @@ type OpenOptions struct {
 }
 
 type Bundle struct {
-	Manifest        Manifest
-	Chunks          []rag.Chunk
-	Representations []rag.Representation
-	Lexical         rag.Index
-	Vector          rag.Index
-	Content         content.Store
+	Manifest Manifest
+	Lexical  rag.Index
+	Vector   rag.Index
+	Content  content.Store
 
 	closeOnce sync.Once
 	closeErr  error
