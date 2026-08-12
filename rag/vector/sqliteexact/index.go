@@ -56,14 +56,55 @@ type Index struct {
 var _ rag.Index = (*Index)(nil)
 
 func Build(ctx context.Context, cfg Config, representations []rag.Representation, chunks []rag.Chunk, vectors []rag.Vector, embedder rag.Embedder) (*Index, error) {
+	representationByID := make(map[string]rag.Representation, len(representations))
+	for _, representation := range representations {
+		representationByID[representation.ID] = representation
+	}
+	chunkByID := make(map[string]rag.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		chunkByID[chunk.ID] = chunk
+	}
+	entries := make([]Entry, 0, len(vectors))
+	for _, vector := range vectors {
+		representation, ok := representationByID[vector.RepresentationID]
+		if !ok {
+			return nil, errors.Errorf("vector references unknown representation %q", vector.RepresentationID)
+		}
+		chunk, ok := chunkByID[representation.ChunkID]
+		if !ok {
+			return nil, errors.Errorf("representation references unknown chunk %q", representation.ChunkID)
+		}
+		if vector.Model != cfg.Model {
+			return nil, errors.Errorf("vector model %q differs from configured model %q", vector.Model, cfg.Model)
+		}
+		entries = append(entries, Entry{
+			RepresentationID: representation.ID, ChunkID: chunk.ID, DocumentID: chunk.DocumentID,
+			Values: vector.Values, ContentDigest: representation.ContentDigest,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].RepresentationID < entries[j].RepresentationID })
+	return BuildEntries(ctx, cfg, len(entries), func(yield func(Entry) error) error {
+		for _, entry := range entries {
+			if err := yield(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, embedder)
+}
+
+// BuildEntries constructs the exact vector database from a bounded producer.
+// Entries must arrive in strictly increasing representation-ID order. The
+// callback is synchronous and each vector is encoded before the next is read.
+func BuildEntries(ctx context.Context, cfg Config, expectedCount int, produce func(func(Entry) error) error, embedder rag.Embedder) (*Index, error) {
 	if strings.TrimSpace(cfg.Path) == "" || strings.TrimSpace(cfg.Model) == "" {
 		return nil, errors.New("SQLite exact path and model are required")
 	}
 	if embedder == nil {
 		return nil, errors.New("query embedder is required")
 	}
-	if len(vectors) == 0 {
-		return nil, errors.New("SQLite exact index requires vectors")
+	if expectedCount < 1 || produce == nil {
+		return nil, errors.New("SQLite exact entry count and producer are required")
 	}
 	if cfg.Channel == "" {
 		cfg.Channel = "sqlite-exact"
@@ -100,52 +141,48 @@ CREATE INDEX embedding_model_dimensions ON embedding(model, dimensions);`)
 	if err != nil {
 		return nil, errors.Wrap(err, "create SQLite vector schema")
 	}
-	representationByID := make(map[string]rag.Representation, len(representations))
-	for _, representation := range representations {
-		representationByID[representation.ID] = representation
-	}
-	chunkByID := make(map[string]rag.Chunk, len(chunks))
-	for _, chunk := range chunks {
-		chunkByID[chunk.ID] = chunk
-	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "begin SQLite vector transaction")
 	}
 	dimensions := 0
-	for _, vector := range vectors {
-		representation, ok := representationByID[vector.RepresentationID]
-		if !ok {
-			_ = tx.Rollback()
-			return nil, errors.Errorf("vector references unknown representation %q", vector.RepresentationID)
+	count := 0
+	lastID := ""
+	err = produce(func(entry Entry) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		chunk, ok := chunkByID[representation.ChunkID]
-		if !ok {
-			_ = tx.Rollback()
-			return nil, errors.Errorf("representation references unknown chunk %q", representation.ChunkID)
+		if strings.TrimSpace(entry.RepresentationID) == "" || entry.ChunkID == "" || entry.DocumentID == "" {
+			return errors.New("SQLite exact entry has incomplete identity")
 		}
-		if vector.Model != cfg.Model {
-			_ = tx.Rollback()
-			return nil, errors.Errorf("vector model %q differs from configured model %q", vector.Model, cfg.Model)
+		if lastID != "" && entry.RepresentationID <= lastID {
+			return errors.Errorf("SQLite exact entries are not in strictly increasing representation-ID order at %q", entry.RepresentationID)
 		}
 		if dimensions == 0 {
-			dimensions = len(vector.Values)
+			dimensions = len(entry.Values)
 		}
-		if len(vector.Values) == 0 || len(vector.Values) != dimensions {
-			_ = tx.Rollback()
-			return nil, errors.New("inconsistent vector dimensions")
+		if len(entry.Values) == 0 || len(entry.Values) != dimensions {
+			return errors.New("inconsistent vector dimensions")
 		}
-		blob, err := encode(vector.Values)
+		blob, err := encode(entry.Values)
 		if err != nil {
-			_ = tx.Rollback()
-			return nil, err
+			return err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO embedding VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			representation.ID, chunk.ID, chunk.DocumentID, cfg.Model, dimensions, blob, representation.ContentDigest)
-		if err != nil {
-			_ = tx.Rollback()
-			return nil, errors.Wrap(err, "insert SQLite vector")
+		if _, err := tx.ExecContext(ctx, `INSERT INTO embedding VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			entry.RepresentationID, entry.ChunkID, entry.DocumentID, cfg.Model, dimensions, blob, entry.ContentDigest); err != nil {
+			return errors.Wrap(err, "insert SQLite vector")
 		}
+		count++
+		lastID = entry.RepresentationID
+		return nil
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, errors.Wrap(err, "consume SQLite exact entries")
+	}
+	if count != expectedCount {
+		_ = tx.Rollback()
+		return nil, errors.Errorf("received %d SQLite exact entries, expected %d", count, expectedCount)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, errors.Wrap(err, "commit SQLite vectors")
@@ -179,7 +216,7 @@ func Open(path, model, channel string, embedder rag.Embedder) (*Index, error) {
 	if channel == "" {
 		channel = "sqlite-exact"
 	}
-	manifest, err := inspectDB(db)
+	manifest, err := inspectDB(context.Background(), db)
 	if err != nil {
 		_ = db.Close()
 		return nil, errors.Wrap(err, "inspect SQLite exact index")
@@ -196,12 +233,21 @@ func Open(path, model, channel string, embedder rag.Embedder) (*Index, error) {
 
 // Inspect returns the persisted vector identity without opening a searcher.
 func Inspect(path string) (Manifest, error) {
+	return InspectContext(context.Background(), path)
+}
+
+// InspectContext returns the persisted vector identity while honoring ctx
+// during database queries and logical-row digesting.
+func InspectContext(ctx context.Context, path string) (Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
+	}
 	db, err := sql.Open("sqlite3", sqliteURI(path, url.Values{"mode": {"ro"}}))
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "open SQLite exact index for inspection")
 	}
 	defer func() { _ = db.Close() }()
-	return inspectDB(db)
+	return inspectDB(ctx, db)
 }
 
 // ReadEntries returns all persisted vectors in stable representation-ID
@@ -212,7 +258,7 @@ func ReadEntries(ctx context.Context, path string) ([]Entry, Manifest, error) {
 		return nil, Manifest{}, errors.Wrap(err, "open SQLite exact index for reading")
 	}
 	defer func() { _ = db.Close() }()
-	manifest, err := inspectDB(db)
+	manifest, err := inspectDB(ctx, db)
 	if err != nil {
 		return nil, Manifest{}, errors.Wrap(err, "inspect SQLite exact entries")
 	}
@@ -262,11 +308,14 @@ ORDER BY representation_id`)
 	return entries, nil
 }
 
-func inspectDB(db *sql.DB) (Manifest, error) {
+func inspectDB(ctx context.Context, db *sql.DB) (Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
+	}
 	var manifest Manifest
 	manifest.Backend = "sqlite-exact"
 	manifest.Version = 1
-	row := db.QueryRow(`
+	row := db.QueryRowContext(ctx, `
 SELECT model, dimensions, COUNT(*)
 FROM embedding
 GROUP BY model, dimensions
@@ -278,7 +327,7 @@ LIMIT 1`)
 		return Manifest{}, errors.Wrap(err, "read SQLite exact identity")
 	}
 	var groups int
-	if err := db.QueryRow(`
+	if err := db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM (
  SELECT model, dimensions FROM embedding GROUP BY model, dimensions
 )`).Scan(&groups); err != nil {
@@ -289,15 +338,50 @@ SELECT COUNT(*) FROM (
 			"SQLite exact index contains %d model/dimension identities", groups,
 		)
 	}
-	entries, err := readEntriesDB(context.Background(), db, manifest.RepresentationCount)
-	if err != nil {
-		return Manifest{}, err
-	}
-	manifest.ContentDigest, err = digest.JSON(entries)
+	contentDigest, err := digestEntriesDB(ctx, db, manifest.RepresentationCount)
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "digest SQLite exact entries")
 	}
+	manifest.ContentDigest = contentDigest
 	return manifest, nil
+}
+
+func digestEntriesDB(ctx context.Context, db *sql.DB, expected int) (string, error) {
+	count := 0
+	value, err := digest.JSONSequence(ctx, func(yield func(Entry) error) error {
+		rows, err := db.QueryContext(ctx, `
+SELECT representation_id, chunk_id, document_id, dimensions, values_blob, content_digest
+FROM embedding
+ORDER BY representation_id`)
+		if err != nil {
+			return errors.Wrap(err, "read SQLite exact entries for digest")
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var entry Entry
+			var dimensions int
+			var blob []byte
+			if err := rows.Scan(&entry.RepresentationID, &entry.ChunkID, &entry.DocumentID, &dimensions, &blob, &entry.ContentDigest); err != nil {
+				return errors.Wrap(err, "scan SQLite exact digest entry")
+			}
+			entry.Values, err = decode(blob, dimensions)
+			if err != nil {
+				return errors.Wrapf(err, "decode SQLite exact digest entry %q", entry.RepresentationID)
+			}
+			if err := yield(entry); err != nil {
+				return err
+			}
+			count++
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return "", err
+	}
+	if count != expected {
+		return "", errors.Errorf("digested %d SQLite exact entries, expected %d", count, expected)
+	}
+	return value, nil
 }
 
 // CalculateContentDigest returns the canonical digest of the logical rows
@@ -360,6 +444,9 @@ func (i *Index) SearchVector(ctx context.Context, queryVector []float32, limit i
 	if limit < 1 {
 		return nil, errors.New("search limit must be positive")
 	}
+	if err := vectorutil.ValidateFinite(queryVector); err != nil {
+		return nil, errors.Wrap(err, "validate query vector")
+	}
 	rows, err := i.db.QueryContext(ctx, `SELECT representation_id, chunk_id, document_id, dimensions, values_blob FROM embedding WHERE model = ?`, i.model)
 	if err != nil {
 		return nil, errors.Wrap(err, "read SQLite vectors")
@@ -374,14 +461,7 @@ func (i *Index) SearchVector(ctx context.Context, queryVector []float32, limit i
 		if err := rows.Scan(&representationID, &chunkID, &documentID, &dimensions, &blob); err != nil {
 			return nil, errors.Wrap(err, "scan SQLite vector")
 		}
-		vector, err := decode(blob, dimensions)
-		if err != nil {
-			return nil, errors.Wrapf(err, "decode vector %q", representationID)
-		}
-		if len(vector) != len(queryVector) {
-			return nil, errors.Errorf("query dimensions %d differ from index dimensions %d", len(queryVector), len(vector))
-		}
-		score, err := vectorutil.Cosine(queryVector, vector)
+		score, err := cosineBlob(queryVector, blob, dimensions)
 		if err != nil {
 			return nil, errors.Wrapf(err, "score vector %q", representationID)
 		}
@@ -433,6 +513,36 @@ func decode(data []byte, dimensions int) ([]float32, error) {
 		values[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
 	}
 	return values, nil
+}
+
+// cosineBlob scores a little-endian float32 vector directly from its SQLite
+// blob. SearchVector uses this path so a corpus-sized query does not allocate
+// a decoded []float32 for every row. The numerical contract matches
+// vector.Cosine: float64 accumulation, finite-value rejection, and zero for a
+// zero-norm vector.
+func cosineBlob(query []float32, data []byte, dimensions int) (float64, error) {
+	if dimensions < 1 || len(data)%4 != 0 || dimensions != len(data)/4 {
+		return 0, errors.Errorf("invalid vector blob length %d for %d dimensions", len(data), dimensions)
+	}
+	if len(query) != dimensions {
+		return 0, errors.Errorf("query dimensions %d differ from index dimensions %d", len(query), dimensions)
+	}
+	var dot, queryNorm, vectorNorm float64
+	for index, queryValue := range query {
+		vectorValue := math.Float32frombits(binary.LittleEndian.Uint32(data[index*4:]))
+		if math.IsNaN(float64(vectorValue)) || math.IsInf(float64(vectorValue), 0) {
+			return 0, errors.Errorf("vector contains a non-finite component at %d", index)
+		}
+		queryFloat := float64(queryValue)
+		vectorFloat := float64(vectorValue)
+		dot += queryFloat * vectorFloat
+		queryNorm += queryFloat * queryFloat
+		vectorNorm += vectorFloat * vectorFloat
+	}
+	if queryNorm == 0 || vectorNorm == 0 {
+		return 0, nil
+	}
+	return dot / math.Sqrt(queryNorm*vectorNorm), nil
 }
 
 type hitHeap []rag.Hit

@@ -49,6 +49,17 @@ func TestValidateChunk(t *testing.T) {
 	}
 }
 
+func TestValidateChunkSourceUsesValidatedSourceSlice(t *testing.T) {
+	document := Document{ID: "doc-1", Text: "hello 🌳 world", ContentDigest: digest.Text("hello 🌳 world")}
+	chunk := Chunk{
+		ID: "chunk-1", DocumentID: document.ID,
+		Range: Range{ByteStart: 6, ByteEnd: 10}, Text: "🌳",
+		ContentDigest: digest.Text("🌳"), Chunker: "fixed",
+	}
+	require.NoError(t, ValidateChunkSource(document.ID, len([]byte(document.Text)), []byte("🌳"), chunk))
+	require.Error(t, ValidateChunkSource(document.ID, len([]byte(document.Text)), []byte("tree"), chunk))
+}
+
 func TestValidateChunkRejectsMismatchedSourceSlice(t *testing.T) {
 	t.Parallel()
 

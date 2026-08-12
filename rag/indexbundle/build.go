@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-go-golems/ragkit/internal/fsutil"
 	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/pkg/errors"
@@ -19,6 +20,7 @@ const (
 	manifestName        = "manifest.json"
 	chunksName          = "chunks.json"
 	representationsName = "representations.json"
+	contentName         = "content.sqlite"
 	bleveName           = "bleve"
 	vectorName          = "vectors.sqlite"
 )
@@ -30,6 +32,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err := validateBuildInput(input); err != nil {
 		return BuildResult{}, err
 	}
+	observeStage(input, BuildStageInputValidated)
 	lexicalTemplate := BackendIdentity{
 		Backend: "bleve-bm25", Version: bleveindex.ManifestVersion, Channel: "bm25",
 		TitleBoost: 2, BodyBoost: 1,
@@ -60,6 +63,10 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if vectorIdentity != nil {
 		vectorIdentity.RepresentationDigest = representationDigest
 	}
+	contentIdentity, err := contentsqlite.NewIdentity(len(input.Documents), len(input.Chunks), corpusDigest, chunkDigest)
+	if err != nil {
+		return BuildResult{}, errors.Wrap(err, "calculate bundle content identity")
+	}
 	manifest := Manifest{
 		SchemaVersion: SchemaVersion, BundleID: bundleID,
 		CreatedAt: time.Now().UTC(), CorpusDigest: corpusDigest,
@@ -68,7 +75,9 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		ChunkCount: len(input.Chunks), RepresentationCount: len(input.Representations),
 		Chunker: input.Chunker, RepresentationKinds: kinds,
 		Lexical: lexicalTemplate, Vector: vectorIdentity,
+		Content: &contentIdentity,
 	}
+	observeStage(input, BuildStageIdentityPlanned)
 	finalPath := filepath.Join(input.OutputRoot, bundleID)
 	if _, statErr := os.Stat(finalPath); statErr == nil {
 		existingState, loadErr := loadVerifiedManifest(ctx, finalPath)
@@ -95,7 +104,8 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		if _, validateErr := loadVerifiedData(ctx, chunks); validateErr != nil {
 			return BuildResult{}, errors.Wrap(validateErr, "existing bundle identity is invalid")
 		}
-		return measureResult(ctx, finalPath, existing, true)
+		observeStage(input, BuildStageExistingVerified)
+		return measureObservedResult(ctx, input, finalPath, existing, true)
 	} else if !os.IsNotExist(statErr) {
 		return BuildResult{}, errors.Wrap(statErr, "inspect bundle destination")
 	}
@@ -106,6 +116,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, errors.Wrap(err, "create temporary bundle")
 	}
+	observeStage(input, BuildStageTemporaryCreated)
 	published := false
 	defer func() {
 		if !published {
@@ -118,6 +129,33 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err := writeJSON(ctx, filepath.Join(temporary, representationsName), input.Representations); err != nil {
 		return BuildResult{}, err
 	}
+	observeStage(input, BuildStagePayloadsWritten)
+	contentResult, err := contentsqlite.Build(ctx, contentsqlite.BuildInput{
+		Path: filepath.Join(temporary, contentName),
+		Documents: func(ctx context.Context, yield func(rag.Document) error) error {
+			for _, document := range input.Documents {
+				if err := yield(document); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		Chunks: func(ctx context.Context, yield func(rag.Chunk) error) error {
+			for _, chunk := range input.Chunks {
+				if err := yield(chunk); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return BuildResult{}, errors.Wrap(err, "build bundle content store")
+	}
+	if contentResult.Identity != contentIdentity {
+		return BuildResult{}, errors.New("built content identity differs from planned identity")
+	}
+	observeStage(input, BuildStageContentBuilt)
 	lexical, lexicalManifest, err := bleveindex.Build(ctx, bleveindex.Config{
 		Path: filepath.Join(temporary, bleveName), Channel: "bm25",
 	}, input.Documents, input.Chunks, input.Representations)
@@ -127,6 +165,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if err := lexical.Close(); err != nil {
 		return BuildResult{}, errors.Wrap(err, "close bundle lexical index")
 	}
+	observeStage(input, BuildStageLexicalBuilt)
 	manifest.Lexical = lexicalIdentity(lexicalManifest)
 	if manifest.Lexical.ContentDigest != lexicalTemplate.ContentDigest {
 		return BuildResult{}, errors.New("built lexical content digest differs from planned identity")
@@ -142,17 +181,19 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		if err := vector.Close(); err != nil {
 			return BuildResult{}, errors.Wrap(err, "close bundle vector index")
 		}
-		persisted, inspectErr := sqliteexact.Inspect(filepath.Join(temporary, vectorName))
+		persisted, inspectErr := sqliteexact.InspectContext(ctx, filepath.Join(temporary, vectorName))
 		if inspectErr != nil {
 			return BuildResult{}, errors.Wrap(inspectErr, "inspect built bundle vector index")
 		}
 		if persisted.ContentDigest != vectorIdentity.ContentDigest {
 			return BuildResult{}, errors.New("built vector content digest differs from planned identity")
 		}
+		observeStage(input, BuildStageVectorBuilt)
 	}
 	if err := writeJSON(ctx, filepath.Join(temporary, manifestName), manifest); err != nil {
 		return BuildResult{}, err
 	}
+	observeStage(input, BuildStageManifestWritten)
 	if err := fsutil.SyncDirectory(temporary); err != nil {
 		return BuildResult{}, errors.Wrap(err, "sync temporary bundle")
 	}
@@ -160,10 +201,25 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		return BuildResult{}, errors.Wrap(err, "publish bundle")
 	}
 	published = true
+	observeStage(input, BuildStageBundlePublished)
 	if err := fsutil.SyncDirectory(input.OutputRoot); err != nil {
 		return BuildResult{}, errors.Wrap(err, "sync bundle output root")
 	}
-	return measureResult(ctx, finalPath, manifest, false)
+	return measureObservedResult(ctx, input, finalPath, manifest, false)
+}
+
+func observeStage(input BuildInput, stage BuildStage) {
+	if input.ObserveStage != nil {
+		input.ObserveStage(stage)
+	}
+}
+
+func measureObservedResult(ctx context.Context, input BuildInput, path string, manifest Manifest, reused bool) (BuildResult, error) {
+	result, err := measureResult(ctx, path, manifest, reused)
+	if err == nil {
+		observeStage(input, BuildStageResultMeasured)
+	}
+	return result, err
 }
 
 func validateBuildInput(input BuildInput) error {

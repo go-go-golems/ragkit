@@ -10,6 +10,7 @@ import (
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/internal/jsonutil"
 	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/pkg/errors"
@@ -35,11 +36,23 @@ func LoadManifest(path string) (Manifest, error) {
 }
 
 func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
-	verified, err := loadVerifiedBundle(ctx, options.Path)
+	manifest, err := Verify(ctx, VerifyOptions{
+		Path: options.Path,
+		ObserveStage: func(stage VerifyStage) {
+			switch stage {
+			case VerifyStageManifest:
+				observeOpenStage(options.ObserveStage, OpenStageManifest)
+			case VerifyStageChunks:
+				observeOpenStage(options.ObserveStage, OpenStageChunks)
+			case VerifyStageRepresentations:
+				observeOpenStage(options.ObserveStage, OpenStageRepresentations)
+			}
+		},
+	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "verify serving bundle")
 	}
-	manifest := verified.manifest
+	observeOpenStage(options.ObserveStage, OpenStageBackendsVerified)
 	// Lexical-only bundles (no vector identity) are a supported serving and
 	// rollback configuration: they open without an embedder and expose a nil
 	// Vector index.
@@ -66,12 +79,27 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 			)
 		}
 	}
+	if manifest.Content == nil {
+		return nil, errors.New("schema-v2 bundle has no content identity")
+	}
+	contentIndex, contentIdentity, err := contentsqlite.Open(ctx, contentsqlite.Config{
+		Path: filepath.Join(options.Path, contentName),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "open bundle content store")
+	}
+	if contentIdentity != *manifest.Content {
+		_ = contentIndex.Close()
+		return nil, errors.New("bundle content identity differs from manifest")
+	}
 	lexical, err := bleveindex.Open(
 		filepath.Join(options.Path, bleveName), manifest.Lexical.Channel,
 	)
 	if err != nil {
+		_ = contentIndex.Close()
 		return nil, errors.Wrap(err, "open bundle lexical index")
 	}
+	observeOpenStage(options.ObserveStage, OpenStageLexicalOpened)
 	var vector rag.Index
 	if manifest.Vector != nil {
 		vector, err = sqliteexact.Open(
@@ -80,14 +108,22 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 		)
 		if err != nil {
 			_ = lexical.Close()
+			_ = contentIndex.Close()
 			return nil, errors.Wrap(err, "open bundle vector index")
 		}
+		observeOpenStage(options.ObserveStage, OpenStageVectorOpened)
 	}
-	return &Bundle{
-		Manifest: manifest, Chunks: verified.chunks,
-		Representations: verified.representations,
-		Lexical:         lexical, Vector: vector,
-	}, nil
+	bundle := &Bundle{
+		Manifest: manifest, Lexical: lexical, Vector: vector, Content: contentIndex,
+	}
+	observeOpenStage(options.ObserveStage, OpenStageReady)
+	return bundle, nil
+}
+
+func observeOpenStage(observer func(OpenStage), stage OpenStage) {
+	if observer != nil {
+		observer(stage)
+	}
 }
 
 type verifiedManifest struct {
@@ -147,6 +183,21 @@ func loadVerifiedChunks(ctx context.Context, state verifiedManifest) (verifiedCh
 }
 
 func loadVerifiedData(ctx context.Context, state verifiedChunks) (verifiedData, error) {
+	verified, err := loadVerifiedStoredData(ctx, state)
+	if err != nil {
+		return verifiedData{}, err
+	}
+	if err := validateBackendIdentity(ctx, verified); err != nil {
+		return verifiedData{}, err
+	}
+	return verified, nil
+}
+
+// loadVerifiedStoredData validates the manifest, chunks, representations, and
+// their content-derived bundle identity without opening either search backend.
+// Callers that only need source lineage can therefore run while a serving
+// Bundle already owns the backend's process-local/exclusive file lock.
+func loadVerifiedStoredData(ctx context.Context, state verifiedChunks) (verifiedData, error) {
 	if err := ctx.Err(); err != nil {
 		return verifiedData{}, err
 	}
@@ -166,25 +217,10 @@ func loadVerifiedData(ctx context.Context, state verifiedChunks) (verifiedData, 
 		return verifiedData{}, err
 	}
 	verified := verifiedData{verifiedChunks: state, representations: representations}
-	if err := validateBackendIdentity(ctx, verified); err != nil {
-		return verifiedData{}, err
-	}
 	if err := validateStoredIdentity(verified); err != nil {
 		return verifiedData{}, err
 	}
 	return verified, nil
-}
-
-func loadVerifiedBundle(ctx context.Context, path string) (verifiedData, error) {
-	manifest, err := loadVerifiedManifest(ctx, path)
-	if err != nil {
-		return verifiedData{}, err
-	}
-	chunks, err := loadVerifiedChunks(ctx, manifest)
-	if err != nil {
-		return verifiedData{}, err
-	}
-	return loadVerifiedData(ctx, chunks)
 }
 
 func validateStoredIdentity(data verifiedData) error {
@@ -200,7 +236,7 @@ func validateStoredIdentity(data verifiedData) error {
 	kinds := representationKinds(data.representations)
 	expectedID, err := calculateIDFromDigests(
 		manifest.CorpusDigest, chunkDigest, representationDigest, kinds,
-		manifest.Chunker, manifest.Lexical, manifest.Vector,
+		manifest.Chunker, manifest.Lexical, manifest.Vector, manifest.Content,
 	)
 	if err != nil {
 		return err
@@ -217,6 +253,40 @@ func validateStoredIdentity(data verifiedData) error {
 }
 
 func validateBackendIdentity(ctx context.Context, data verifiedData) error {
+	if err := validateContentBackendIdentity(ctx, data.verifiedManifest); err != nil {
+		return err
+	}
+	if err := validateLexicalBackendIdentity(ctx, data.verifiedManifest); err != nil {
+		return err
+	}
+	return validateVectorBackendIdentity(ctx, data.verifiedManifest)
+}
+
+func validateContentBackendIdentity(ctx context.Context, data verifiedManifest) error {
+	if data.manifest.Content == nil {
+		return errors.New("schema-v2 bundle has no content identity")
+	}
+	contentIndex, storedIdentity, err := contentsqlite.Open(ctx, contentsqlite.Config{
+		Path: filepath.Join(data.path, contentName),
+	})
+	if err != nil {
+		return errors.Wrap(err, "open bundle content store for verification")
+	}
+	defer func() { _ = contentIndex.Close() }()
+	if storedIdentity != *data.manifest.Content {
+		return errors.New("bundle content identity differs from manifest")
+	}
+	contentIdentity, err := contentIndex.Inspect(ctx)
+	if err != nil {
+		return errors.Wrap(err, "inspect bundle content")
+	}
+	if contentIdentity != *data.manifest.Content {
+		return errors.New("bundle content identity differs from manifest")
+	}
+	return nil
+}
+
+func validateLexicalBackendIdentity(ctx context.Context, data verifiedManifest) error {
 	manifest := data.manifest
 	path := data.path
 	bleveData, err := os.ReadFile(filepath.Join(path, bleveName, "rag-manifest.json"))
@@ -234,18 +304,24 @@ func validateBackendIdentity(ctx context.Context, data verifiedData) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	lexicalDigest, err := bleveindex.InspectContentDigest(filepath.Join(path, bleveName))
+	lexicalDigest, err := bleveindex.InspectContentDigest(ctx, filepath.Join(path, bleveName), 512)
 	if err != nil {
 		return errors.Wrap(err, "inspect bundle lexical content")
 	}
 	if lexicalDigest != manifest.Lexical.ContentDigest {
 		return errors.New("bundle lexical content differs from manifest")
 	}
+	return nil
+}
+
+func validateVectorBackendIdentity(ctx context.Context, data verifiedManifest) error {
+	manifest := data.manifest
+	path := data.path
 	if manifest.Vector != nil {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		vectorManifest, err := sqliteexact.Inspect(filepath.Join(path, vectorName))
+		vectorManifest, err := sqliteexact.InspectContext(ctx, filepath.Join(path, vectorName))
 		if err != nil {
 			return errors.Wrap(err, "inspect bundle vector index")
 		}

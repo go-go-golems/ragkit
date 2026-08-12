@@ -3,14 +3,17 @@
 package indexbundle
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 type ChunkerIdentity struct {
 	Name            string `json:"name"`
@@ -40,19 +43,20 @@ type VectorIdentity struct {
 }
 
 type Manifest struct {
-	SchemaVersion       int             `json:"schema_version"`
-	BundleID            string          `json:"bundle_id"`
-	CreatedAt           time.Time       `json:"created_at"`
-	CorpusDigest        string          `json:"corpus_digest"`
-	ChunkDigest         string          `json:"chunk_digest"`
-	CorpusPath          string          `json:"corpus_path"`
-	DocumentCount       int             `json:"document_count"`
-	ChunkCount          int             `json:"chunk_count"`
-	RepresentationCount int             `json:"representation_count"`
-	Chunker             ChunkerIdentity `json:"chunker"`
-	RepresentationKinds []string        `json:"representation_kinds"`
-	Lexical             BackendIdentity `json:"lexical"`
-	Vector              *VectorIdentity `json:"vector,omitempty"`
+	SchemaVersion       int                     `json:"schema_version"`
+	BundleID            string                  `json:"bundle_id"`
+	CreatedAt           time.Time               `json:"created_at"`
+	CorpusDigest        string                  `json:"corpus_digest"`
+	ChunkDigest         string                  `json:"chunk_digest"`
+	CorpusPath          string                  `json:"corpus_path"`
+	DocumentCount       int                     `json:"document_count"`
+	ChunkCount          int                     `json:"chunk_count"`
+	RepresentationCount int                     `json:"representation_count"`
+	Chunker             ChunkerIdentity         `json:"chunker"`
+	RepresentationKinds []string                `json:"representation_kinds"`
+	Lexical             BackendIdentity         `json:"lexical"`
+	Vector              *VectorIdentity         `json:"vector,omitempty"`
+	Content             *contentsqlite.Identity `json:"content,omitempty"`
 }
 
 type BuildInput struct {
@@ -65,6 +69,82 @@ type BuildInput struct {
 	QueryEmbedder   rag.Embedder
 	Chunker         ChunkerIdentity
 	Embedding       *VectorIdentity
+	// ObserveStage receives synchronous build-boundary notifications. It is
+	// intended for diagnostics such as memory and duration telemetry; observers
+	// must return quickly and must not mutate BuildInput values.
+	ObserveStage func(BuildStage)
+}
+
+// StreamInput builds the same immutable bundle contract as Build while
+// admitting caller data through bounded, validated batches. Produce is called
+// synchronously exactly once; it must add documents, chunks, representations,
+// and, when configured, vectors in that phase order.
+type StreamInput struct {
+	OutputRoot    string
+	CorpusPath    string
+	Chunker       ChunkerIdentity
+	Embedding     *VectorIdentity
+	QueryEmbedder rag.Embedder
+	BatchSize     int
+	Produce       func(context.Context, *Stager) error
+	ObserveStage  func(BuildStage)
+}
+
+// BuildStage identifies a completed, externally meaningful bundle-build
+// boundary. Values are stable log/telemetry identifiers rather than display
+// strings.
+type BuildStage string
+
+const (
+	BuildStageInputValidated   BuildStage = "input_validated"
+	BuildStageStagingProduced  BuildStage = "staging_produced"
+	BuildStageStagingSealed    BuildStage = "staging_sealed"
+	BuildStageIdentityPlanned  BuildStage = "identity_planned"
+	BuildStageExistingVerified BuildStage = "existing_verified"
+	BuildStageTemporaryCreated BuildStage = "temporary_created"
+	BuildStagePayloadsWritten  BuildStage = "payloads_written"
+	BuildStageContentBuilt     BuildStage = "content_built"
+	BuildStageLexicalBuilt     BuildStage = "lexical_built"
+	BuildStageVectorBuilt      BuildStage = "vector_built"
+	BuildStageManifestWritten  BuildStage = "manifest_written"
+	BuildStageBundlePublished  BuildStage = "bundle_published"
+	BuildStageResultMeasured   BuildStage = "result_measured"
+)
+
+// VerifyStage identifies a completed, externally meaningful existing-bundle
+// verification boundary. Values are stable telemetry identifiers.
+type VerifyStage string
+
+const (
+	VerifyStageManifest        VerifyStage = "manifest"
+	VerifyStageChunks          VerifyStage = "chunks"
+	VerifyStageRepresentations VerifyStage = "representations"
+	VerifyStageLexical         VerifyStage = "lexical"
+	VerifyStageVector          VerifyStage = "vector"
+	VerifyStageComplete        VerifyStage = "complete"
+)
+
+// OpenStage identifies a completed serving-startup boundary. Observers are
+// diagnostic only and must return quickly without mutating opened values.
+type OpenStage string
+
+const (
+	OpenStageManifest         OpenStage = "manifest"
+	OpenStageChunks           OpenStage = "chunks"
+	OpenStageRepresentations  OpenStage = "representations"
+	OpenStageBackendsVerified OpenStage = "backends_verified"
+	OpenStageLexicalOpened    OpenStage = "lexical_opened"
+	OpenStageVectorOpened     OpenStage = "vector_opened"
+	OpenStageReady            OpenStage = "ready"
+)
+
+// VerifyOptions runs the same fail-closed validation used before BuildStream
+// reuses an immutable bundle. Expected values are optional additional bounds.
+type VerifyOptions struct {
+	Path               string
+	ExpectedBundleID   string
+	ExpectedCorpusPath string
+	ObserveStage       func(VerifyStage)
 }
 
 type BuildResult struct {
@@ -81,14 +161,14 @@ type OpenOptions struct {
 	EmbeddingProvider   string
 	EmbeddingModel      string
 	EmbeddingDimensions int
+	ObserveStage        func(OpenStage)
 }
 
 type Bundle struct {
-	Manifest        Manifest
-	Chunks          []rag.Chunk
-	Representations []rag.Representation
-	Lexical         rag.Index
-	Vector          rag.Index
+	Manifest Manifest
+	Lexical  rag.Index
+	Vector   rag.Index
+	Content  content.Store
 
 	closeOnce sync.Once
 	closeErr  error
@@ -104,6 +184,11 @@ func (b *Bundle) Close() error {
 		}
 		if b.Vector != nil {
 			if err := b.Vector.Close(); b.closeErr == nil {
+				b.closeErr = err
+			}
+		}
+		if b.Content != nil {
+			if err := b.Content.Close(); b.closeErr == nil {
 				b.closeErr = err
 			}
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	blevelib "github.com/blevesearch/bleve/v2"
@@ -36,7 +37,11 @@ type Manifest struct {
 
 const ManifestVersion = 3
 
-type record struct {
+// Record is the complete logical row persisted by the Bleve backend.
+// BuildRecords accepts these rows in strictly increasing representation-ID
+// order so it can validate uniqueness and calculate its digest without
+// retaining the complete input.
+type Record struct {
 	RepresentationID string `json:"representation_id"`
 	ChunkID          string `json:"chunk_id"`
 	DocumentID       string `json:"document_id"`
@@ -69,7 +74,7 @@ func CalculateContentDigest(documents []rag.Document, chunks []rag.Chunk, repres
 	for _, chunk := range chunks {
 		chunkByID[chunk.ID] = chunk
 	}
-	records := make([]record, 0, len(representations))
+	records := make([]Record, 0, len(representations))
 	for _, representation := range representations {
 		chunk, ok := chunkByID[representation.ChunkID]
 		if !ok {
@@ -79,7 +84,7 @@ func CalculateContentDigest(documents []rag.Document, chunks []rag.Chunk, repres
 		if !ok {
 			return "", errors.Errorf("chunk %q references unknown document %q", chunk.ID, chunk.DocumentID)
 		}
-		records = append(records, record{
+		records = append(records, Record{
 			RepresentationID: representation.ID,
 			ChunkID:          chunk.ID,
 			DocumentID:       document.ID,
@@ -93,19 +98,8 @@ func CalculateContentDigest(documents []rag.Document, chunks []rag.Chunk, repres
 }
 
 func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []rag.Chunk, representations []rag.Representation) (*Index, Manifest, error) {
-	cfg = defaults(cfg)
-	if math.IsNaN(cfg.TitleBoost) || math.IsInf(cfg.TitleBoost, 0) || cfg.TitleBoost <= 0 ||
-		math.IsNaN(cfg.BodyBoost) || math.IsInf(cfg.BodyBoost, 0) || cfg.BodyBoost <= 0 {
-		return nil, Manifest{}, errors.New("Bleve title and body boosts must be finite and greater than zero")
-	}
 	if err := validateRepresentationIDs(representations); err != nil {
 		return nil, Manifest{}, err
-	}
-	if strings.TrimSpace(cfg.Path) == "" {
-		return nil, Manifest{}, errors.New("Bleve index path is required")
-	}
-	if len(representations) == 0 {
-		return nil, Manifest{}, errors.New("Bleve index requires representations")
 	}
 	documentByID := make(map[string]rag.Document, len(documents))
 	for _, document := range documents {
@@ -114,6 +108,51 @@ func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []r
 	chunkByID := make(map[string]rag.Chunk, len(chunks))
 	for _, chunk := range chunks {
 		chunkByID[chunk.ID] = chunk
+	}
+	records := make([]Record, 0, len(representations))
+	for _, representation := range representations {
+		chunk, ok := chunkByID[representation.ChunkID]
+		if !ok {
+			return nil, Manifest{}, errors.Errorf("representation %q references unknown chunk %q", representation.ID, representation.ChunkID)
+		}
+		document, ok := documentByID[chunk.DocumentID]
+		if !ok {
+			return nil, Manifest{}, errors.Errorf("chunk %q references unknown document %q", chunk.ID, chunk.DocumentID)
+		}
+		records = append(records, Record{
+			RepresentationID: representation.ID,
+			ChunkID:          chunk.ID,
+			DocumentID:       document.ID,
+			Kind:             representation.Kind,
+			Title:            document.Title,
+			Body:             representation.Text,
+		})
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].RepresentationID < records[j].RepresentationID })
+	return BuildRecords(ctx, cfg, len(records), func(yield func(Record) error) error {
+		for _, current := range records {
+			if err := yield(current); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// BuildRecords constructs a Bleve index from a bounded producer. Records must
+// arrive in strictly increasing representation-ID order. The callback is
+// synchronous and BuildRecords retains at most one configured Bleve batch.
+func BuildRecords(ctx context.Context, cfg Config, expectedCount int, produce func(func(Record) error) error) (*Index, Manifest, error) {
+	cfg = defaults(cfg)
+	if math.IsNaN(cfg.TitleBoost) || math.IsInf(cfg.TitleBoost, 0) || cfg.TitleBoost <= 0 ||
+		math.IsNaN(cfg.BodyBoost) || math.IsInf(cfg.BodyBoost, 0) || cfg.BodyBoost <= 0 {
+		return nil, Manifest{}, errors.New("Bleve title and body boosts must be finite and greater than zero")
+	}
+	if strings.TrimSpace(cfg.Path) == "" {
+		return nil, Manifest{}, errors.New("Bleve index path is required")
+	}
+	if expectedCount < 1 || produce == nil {
+		return nil, Manifest{}, errors.New("Bleve record count and producer are required")
 	}
 	parent := filepath.Dir(cfg.Path)
 	if err := os.MkdirAll(parent, 0o700); err != nil {
@@ -133,8 +172,6 @@ func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []r
 	documentMapping := blevelib.NewDocumentMapping()
 	storedID := blevelib.NewKeywordFieldMapping()
 	storedID.Store = true
-	// Stable identities must be sortable before Bleve applies the result
-	// cutoff. Keyword indexing retains exact values and document values.
 	storedID.Index = true
 	documentMapping.AddFieldMappingsAt("representation_id", storedID)
 	documentMapping.AddFieldMappingsAt("chunk_id", storedID)
@@ -156,51 +193,46 @@ func Build(ctx context.Context, cfg Config, documents []rag.Document, chunks []r
 		}
 	}()
 	batch := index.NewBatch()
-	records := make([]record, 0, len(representations))
-	for i, representation := range representations {
-		if err := ctx.Err(); err != nil {
-			return nil, Manifest{}, err
-		}
-		chunk, ok := chunkByID[representation.ChunkID]
-		if !ok {
-			return nil, Manifest{}, errors.Errorf("representation %q references unknown chunk %q", representation.ID, representation.ChunkID)
-		}
-		document, ok := documentByID[chunk.DocumentID]
-		if !ok {
-			return nil, Manifest{}, errors.Errorf("chunk %q references unknown document %q", chunk.ID, chunk.DocumentID)
-		}
-		stored := record{
-			RepresentationID: representation.ID,
-			ChunkID:          chunk.ID,
-			DocumentID:       document.ID,
-			Kind:             representation.Kind,
-			Title:            document.Title,
-			Body:             representation.Text,
-		}
-		records = append(records, stored)
-		err := batch.Index(representation.ID, stored)
-		if err != nil {
-			return nil, Manifest{}, errors.Wrap(err, "add Bleve batch record")
-		}
-		if (i+1)%cfg.BatchSize == 0 {
-			if err := index.Batch(batch); err != nil {
-				return nil, Manifest{}, errors.Wrap(err, "commit Bleve batch")
+	count := 0
+	lastID := ""
+	contentDigest, err := digest.JSONSequence(ctx, func(yieldDigest func(Record) error) error {
+		return produce(func(current Record) error {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			batch = index.NewBatch()
-		}
+			if strings.TrimSpace(current.RepresentationID) == "" || current.ChunkID == "" || current.DocumentID == "" {
+				return errors.New("Bleve record has incomplete identity")
+			}
+			if lastID != "" && current.RepresentationID <= lastID {
+				return errors.Errorf("Bleve records are not in strictly increasing representation-ID order at %q", current.RepresentationID)
+			}
+			if err := batch.Index(current.RepresentationID, current); err != nil {
+				return errors.Wrap(err, "add Bleve batch record")
+			}
+			count++
+			lastID = current.RepresentationID
+			if count%cfg.BatchSize == 0 {
+				if err := index.Batch(batch); err != nil {
+					return errors.Wrap(err, "commit Bleve batch")
+				}
+				batch = index.NewBatch()
+			}
+			return yieldDigest(current)
+		})
+	})
+	if err != nil {
+		return nil, Manifest{}, errors.Wrap(err, "consume Bleve records")
+	}
+	if count != expectedCount {
+		return nil, Manifest{}, errors.Errorf("received %d Bleve records, expected %d", count, expectedCount)
 	}
 	if batch.Size() > 0 {
 		if err := index.Batch(batch); err != nil {
 			return nil, Manifest{}, errors.Wrap(err, "commit final Bleve batch")
 		}
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].RepresentationID < records[j].RepresentationID })
-	contentDigest, err := digest.JSON(records)
-	if err != nil {
-		return nil, Manifest{}, errors.Wrap(err, "digest Bleve records")
-	}
 	manifest := Manifest{
-		Backend: "bleve-bm25", Version: ManifestVersion, RepresentationCount: len(representations),
+		Backend: "bleve-bm25", Version: ManifestVersion, RepresentationCount: count,
 		Channel: cfg.Channel, TitleBoost: cfg.TitleBoost, BodyBoost: cfg.BodyBoost,
 		ContentDigest: contentDigest,
 	}
@@ -264,7 +296,13 @@ func validateRepresentationIDs(representations []rag.Representation) error {
 // InspectContentDigest reconstructs the canonical logical records from the
 // persisted index. It binds a bundle to indexed content, not merely to the
 // backend's record count and configuration manifest.
-func InspectContentDigest(path string) (string, error) {
+func InspectContentDigest(ctx context.Context, path string, pageSize int) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if pageSize < 1 {
+		return "", errors.New("Bleve inspection page size must be positive")
+	}
 	data, err := os.ReadFile(filepath.Join(path, "rag-manifest.json"))
 	if err != nil {
 		return "", errors.Wrap(err, "read Bleve manifest")
@@ -273,33 +311,53 @@ func InspectContentDigest(path string) (string, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return "", errors.Wrap(err, "decode Bleve manifest")
 	}
-	index, err := blevelib.OpenUsing(path, map[string]interface{}{"bolt_timeout": "3s"})
+	index, err := blevelib.OpenUsing(path, map[string]interface{}{
+		"bolt_timeout": "3s",
+		"read_only":    true,
+	})
 	if err != nil {
 		return "", errors.Wrap(err, "open Bleve index for content inspection")
 	}
 	defer func() { _ = index.Close() }()
-	request := blevelib.NewSearchRequestOptions(blevelib.NewMatchAllQuery(), manifest.RepresentationCount, 0, false)
-	request.SortBy([]string{"_id"})
-	request.Fields = []string{"representation_id", "chunk_id", "document_id", "kind", "title", "body"}
-	result, err := index.Search(request)
+	expectedCount := strconv.Itoa(manifest.RepresentationCount)
+	count := 0
+	contentDigest, err := digest.JSONSequence(ctx, func(yield func(Record) error) error {
+		for count < manifest.RepresentationCount {
+			size := min(pageSize, manifest.RepresentationCount-count)
+			request := blevelib.NewSearchRequestOptions(blevelib.NewMatchAllQuery(), size, count, false)
+			request.SortBy([]string{"_id"})
+			request.Fields = []string{"representation_id", "chunk_id", "document_id", "kind", "title", "body"}
+			result, err := index.SearchInContext(ctx, request)
+			if err != nil {
+				return errors.Wrap(err, "read Bleve records for content inspection")
+			}
+			if strconv.FormatUint(result.Total, 10) != expectedCount {
+				return errors.Errorf("Bleve index contains %d records, expected %d", result.Total, manifest.RepresentationCount)
+			}
+			if len(result.Hits) == 0 {
+				return errors.Errorf("Bleve index returned no records at offset %d", count)
+			}
+			for _, hit := range result.Hits {
+				record := Record{
+					RepresentationID: stringField(hit.Fields, "representation_id", hit.ID),
+					ChunkID:          stringField(hit.Fields, "chunk_id", ""),
+					DocumentID:       stringField(hit.Fields, "document_id", ""),
+					Kind:             stringField(hit.Fields, "kind", ""),
+					Title:            stringField(hit.Fields, "title", ""),
+					Body:             stringField(hit.Fields, "body", ""),
+				}
+				if err := yield(record); err != nil {
+					return err
+				}
+				count++
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return "", errors.Wrap(err, "read Bleve records for content inspection")
+		return "", err
 	}
-	if len(result.Hits) != manifest.RepresentationCount {
-		return "", errors.Errorf("Bleve index contains %d records, expected %d", len(result.Hits), manifest.RepresentationCount)
-	}
-	records := make([]record, 0, len(result.Hits))
-	for _, hit := range result.Hits {
-		records = append(records, record{
-			RepresentationID: stringField(hit.Fields, "representation_id", hit.ID),
-			ChunkID:          stringField(hit.Fields, "chunk_id", ""),
-			DocumentID:       stringField(hit.Fields, "document_id", ""),
-			Kind:             stringField(hit.Fields, "kind", ""),
-			Title:            stringField(hit.Fields, "title", ""),
-			Body:             stringField(hit.Fields, "body", ""),
-		})
-	}
-	return digest.JSON(records)
+	return contentDigest, nil
 }
 
 func Open(path, channel string) (*Index, error) {
@@ -309,6 +367,7 @@ func Open(path, channel string) (*Index, error) {
 	// held lock into the error below instead.
 	index, err := blevelib.OpenUsing(path, map[string]interface{}{
 		"bolt_timeout": "3s",
+		"read_only":    true,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "timeout") {

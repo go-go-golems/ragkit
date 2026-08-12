@@ -81,7 +81,7 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 		EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	require.NoError(t, err)
-	require.Equal(t, input.Chunks, bundle.Chunks)
+	require.NotNil(t, bundle.Content)
 	lexical, err := bundle.Lexical.Search(
 		t.Context(), rag.Query{ID: "q", Text: "lobed leaves"}, 5,
 	)
@@ -94,6 +94,63 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 	require.NotEmpty(t, vector)
 	require.NoError(t, bundle.Close())
 	require.NoError(t, bundle.Close(), "close must be idempotent")
+}
+
+func TestOpenReportsCompletedServingStages(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	built, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	var stages []OpenStage
+	bundle, err := Open(t.Context(), OpenOptions{
+		Path: built.Path, QueryEmbedder: input.QueryEmbedder,
+		EmbeddingProvider: "hash", EmbeddingModel: "hash-v1-d16",
+		EmbeddingDimensions: 16,
+		ObserveStage:        func(stage OpenStage) { stages = append(stages, stage) },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, bundle.Close()) })
+	require.Equal(t, []OpenStage{
+		OpenStageManifest,
+		OpenStageChunks,
+		OpenStageRepresentations,
+		OpenStageBackendsVerified,
+		OpenStageLexicalOpened,
+		OpenStageVectorOpened,
+		OpenStageReady,
+	}, stages)
+}
+
+func TestBuildReportsCompletedStageBoundaries(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	var stages []BuildStage
+	input.ObserveStage = func(stage BuildStage) {
+		stages = append(stages, stage)
+	}
+
+	_, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, []BuildStage{
+		BuildStageInputValidated,
+		BuildStageIdentityPlanned,
+		BuildStageTemporaryCreated,
+		BuildStagePayloadsWritten,
+		BuildStageContentBuilt,
+		BuildStageLexicalBuilt,
+		BuildStageVectorBuilt,
+		BuildStageManifestWritten,
+		BuildStageBundlePublished,
+		BuildStageResultMeasured,
+	}, stages)
+
+	stages = nil
+	_, err = Build(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, []BuildStage{
+		BuildStageInputValidated,
+		BuildStageIdentityPlanned,
+		BuildStageExistingVerified,
+		BuildStageResultMeasured,
+	}, stages)
 }
 
 func TestBuildRejectsReuseForDifferentCorpusPath(t *testing.T) {
