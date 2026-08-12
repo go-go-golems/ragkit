@@ -64,11 +64,10 @@ func ValidateChunk(document Document, chunk Chunk) error {
 	if err := ValidateDocument(document); err != nil {
 		return err
 	}
-	source := []byte(document.Text)
-	if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart || chunk.Range.ByteEnd > len(source) {
+	if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart || chunk.Range.ByteEnd > len(document.Text) {
 		return fmt.Errorf("chunk %q has invalid byte range [%d,%d)", chunk.ID, chunk.Range.ByteStart, chunk.Range.ByteEnd)
 	}
-	return ValidateChunkSource(document.ID, len(source), source[chunk.Range.ByteStart:chunk.Range.ByteEnd], chunk)
+	return ValidateChunkSource(document.ID, len(document.Text), []byte(document.Text[chunk.Range.ByteStart:chunk.Range.ByteEnd]), chunk)
 }
 
 // ValidateChunkSource validates a chunk against a previously validated source
