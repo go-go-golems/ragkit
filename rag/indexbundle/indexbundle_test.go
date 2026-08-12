@@ -96,6 +96,30 @@ func TestBuildIsDeterministicReusableAndOpenable(t *testing.T) {
 	require.NoError(t, bundle.Close(), "close must be idempotent")
 }
 
+func TestOpenReportsCompletedServingStages(t *testing.T) {
+	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
+	built, err := Build(t.Context(), input)
+	require.NoError(t, err)
+	var stages []OpenStage
+	bundle, err := Open(t.Context(), OpenOptions{
+		Path: built.Path, QueryEmbedder: input.QueryEmbedder,
+		EmbeddingProvider: "hash", EmbeddingModel: "hash-v1-d16",
+		EmbeddingDimensions: 16,
+		ObserveStage:        func(stage OpenStage) { stages = append(stages, stage) },
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, bundle.Close()) })
+	require.Equal(t, []OpenStage{
+		OpenStageManifest,
+		OpenStageChunks,
+		OpenStageRepresentations,
+		OpenStageBackendsVerified,
+		OpenStageLexicalOpened,
+		OpenStageVectorOpened,
+		OpenStageReady,
+	}, stages)
+}
+
 func TestBuildReportsCompletedStageBoundaries(t *testing.T) {
 	input := fixtureInput(t, filepath.Join(t.TempDir(), "indexes"))
 	var stages []BuildStage

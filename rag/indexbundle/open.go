@@ -35,10 +35,25 @@ func LoadManifest(path string) (Manifest, error) {
 }
 
 func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
-	verified, err := loadVerifiedBundle(ctx, options.Path)
+	manifestState, err := loadVerifiedManifest(ctx, options.Path)
 	if err != nil {
 		return nil, err
 	}
+	observeOpenStage(options.ObserveStage, OpenStageManifest)
+	chunkState, err := loadVerifiedChunks(ctx, manifestState)
+	if err != nil {
+		return nil, err
+	}
+	observeOpenStage(options.ObserveStage, OpenStageChunks)
+	verified, err := loadVerifiedStoredData(ctx, chunkState)
+	if err != nil {
+		return nil, err
+	}
+	observeOpenStage(options.ObserveStage, OpenStageRepresentations)
+	if err := validateBackendIdentity(ctx, verified); err != nil {
+		return nil, err
+	}
+	observeOpenStage(options.ObserveStage, OpenStageBackendsVerified)
 	manifest := verified.manifest
 	// Lexical-only bundles (no vector identity) are a supported serving and
 	// rollback configuration: they open without an embedder and expose a nil
@@ -72,6 +87,7 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "open bundle lexical index")
 	}
+	observeOpenStage(options.ObserveStage, OpenStageLexicalOpened)
 	var vector rag.Index
 	if manifest.Vector != nil {
 		vector, err = sqliteexact.Open(
@@ -82,12 +98,21 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 			_ = lexical.Close()
 			return nil, errors.Wrap(err, "open bundle vector index")
 		}
+		observeOpenStage(options.ObserveStage, OpenStageVectorOpened)
 	}
-	return &Bundle{
+	bundle := &Bundle{
 		Manifest: manifest, Chunks: verified.chunks,
 		Representations: verified.representations,
 		Lexical:         lexical, Vector: vector,
-	}, nil
+	}
+	observeOpenStage(options.ObserveStage, OpenStageReady)
+	return bundle, nil
+}
+
+func observeOpenStage(observer func(OpenStage), stage OpenStage) {
+	if observer != nil {
+		observer(stage)
+	}
 }
 
 type verifiedManifest struct {
@@ -185,18 +210,6 @@ func loadVerifiedStoredData(ctx context.Context, state verifiedChunks) (verified
 		return verifiedData{}, err
 	}
 	return verified, nil
-}
-
-func loadVerifiedBundle(ctx context.Context, path string) (verifiedData, error) {
-	manifest, err := loadVerifiedManifest(ctx, path)
-	if err != nil {
-		return verifiedData{}, err
-	}
-	chunks, err := loadVerifiedChunks(ctx, manifest)
-	if err != nil {
-		return verifiedData{}, err
-	}
-	return loadVerifiedData(ctx, chunks)
 }
 
 func validateStoredIdentity(data verifiedData) error {

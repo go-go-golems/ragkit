@@ -120,6 +120,20 @@ const (
 	VerifyStageComplete        VerifyStage = "complete"
 )
 
+// OpenStage identifies a completed serving-startup boundary. Observers are
+// diagnostic only and must return quickly without mutating opened values.
+type OpenStage string
+
+const (
+	OpenStageManifest         OpenStage = "manifest"
+	OpenStageChunks           OpenStage = "chunks"
+	OpenStageRepresentations  OpenStage = "representations"
+	OpenStageBackendsVerified OpenStage = "backends_verified"
+	OpenStageLexicalOpened    OpenStage = "lexical_opened"
+	OpenStageVectorOpened     OpenStage = "vector_opened"
+	OpenStageReady            OpenStage = "ready"
+)
+
 // VerifyOptions runs the same fail-closed validation used before BuildStream
 // reuses an immutable bundle. Expected values are optional additional bounds.
 type VerifyOptions struct {
@@ -143,6 +157,7 @@ type OpenOptions struct {
 	EmbeddingProvider   string
 	EmbeddingModel      string
 	EmbeddingDimensions int
+	ObserveStage        func(OpenStage)
 }
 
 type Bundle struct {
