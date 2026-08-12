@@ -120,6 +120,32 @@ func TestBuildRejectsVectorModelMismatch(t *testing.T) {
 	}
 }
 
+func TestInspectContextHonorsCancellation(t *testing.T) {
+	representations := []rag.Representation{
+		{ID: "rep-a", ChunkID: "chunk-a", ContentDigest: "a"},
+	}
+	chunks := []rag.Chunk{
+		{ID: "chunk-a", DocumentID: "doc-a"},
+	}
+	vectors := []rag.Vector{
+		{RepresentationID: "rep-a", Model: "model", Values: []float32{1, 0}},
+	}
+	path := filepath.Join(t.TempDir(), "vectors.sqlite")
+	index, err := Build(t.Context(), Config{Path: path, Model: "model"}, representations, chunks, vectors, fakeEmbedder{vector: []float32{1, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := InspectContext(ctx, path); err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("InspectContext cancellation error = %v", err)
+	}
+}
+
 func TestBuildEntriesMatchesEagerManifestAndFailsClosed(t *testing.T) {
 	representations := []rag.Representation{
 		{ID: "rep-a", ChunkID: "chunk-a", ContentDigest: "a"},

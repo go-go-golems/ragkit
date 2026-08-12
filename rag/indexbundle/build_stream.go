@@ -149,7 +149,7 @@ func BuildStream(ctx context.Context, input StreamInput) (BuildResult, error) {
 		if err := vector.Close(); err != nil {
 			return BuildResult{}, errors.Wrap(err, "close streamed vector index")
 		}
-		persisted, err := sqliteexact.Inspect(filepath.Join(temporary, vectorName))
+		persisted, err := sqliteexact.InspectContext(ctx, filepath.Join(temporary, vectorName))
 		if err != nil {
 			return BuildResult{}, errors.Wrap(err, "inspect streamed vector index")
 		}

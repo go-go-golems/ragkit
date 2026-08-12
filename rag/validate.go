@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"strings"
@@ -63,16 +64,31 @@ func ValidateChunk(document Document, chunk Chunk) error {
 	if err := ValidateDocument(document); err != nil {
 		return err
 	}
+	source := []byte(document.Text)
+	if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart || chunk.Range.ByteEnd > len(source) {
+		return fmt.Errorf("chunk %q has invalid byte range [%d,%d)", chunk.ID, chunk.Range.ByteStart, chunk.Range.ByteEnd)
+	}
+	return ValidateChunkSource(document.ID, len(source), source[chunk.Range.ByteStart:chunk.Range.ByteEnd], chunk)
+}
+
+// ValidateChunkSource validates a chunk against a previously validated source
+// document without revalidating or rehashing the full document. sourceLength
+// is measured in bytes, and sourceSlice must be the exact byte slice addressed
+// by chunk.Range.
+func ValidateChunkSource(documentID string, sourceLength int, sourceSlice []byte, chunk Chunk) error {
+	if documentID == "" {
+		return fmt.Errorf("document ID is required")
+	}
 	if chunk.ID == "" {
 		return fmt.Errorf("chunk ID is required")
 	}
-	if chunk.DocumentID != document.ID {
-		return fmt.Errorf("chunk %q belongs to document %q, not %q", chunk.ID, chunk.DocumentID, document.ID)
+	if chunk.DocumentID != documentID {
+		return fmt.Errorf("chunk %q belongs to document %q, not %q", chunk.ID, chunk.DocumentID, documentID)
 	}
-	if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart || chunk.Range.ByteEnd > len(document.Text) {
+	if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart || chunk.Range.ByteEnd > sourceLength {
 		return fmt.Errorf("chunk %q has invalid byte range [%d,%d)", chunk.ID, chunk.Range.ByteStart, chunk.Range.ByteEnd)
 	}
-	if document.Text[chunk.Range.ByteStart:chunk.Range.ByteEnd] != chunk.Text {
+	if !bytes.Equal(sourceSlice, []byte(chunk.Text)) {
 		return fmt.Errorf("chunk %q text does not match its source range", chunk.ID)
 	}
 	if !utf8.ValidString(chunk.Text) {

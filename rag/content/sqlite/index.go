@@ -260,16 +260,17 @@ func writeChunks(ctx context.Context, db *sql.DB, producer Producer[rag.Chunk]) 
 			}
 		}()
 		err = producer(ctx, func(chunk rag.Chunk) error {
-			var sourceURI, title, text, contentDigest, metadataJSON string
-			if err := tx.QueryRowContext(ctx, `SELECT source_uri, title, text, content_digest, metadata_json FROM document WHERE id = ?`, chunk.DocumentID).Scan(&sourceURI, &title, &text, &contentDigest, &metadataJSON); err != nil {
-				return errors.Wrapf(err, "load parent document for chunk %q", chunk.ID)
+			var sourceLength int
+			var sourceSlice []byte
+			if err := tx.QueryRowContext(ctx, `
+SELECT length(CAST(text AS BLOB)),
+       substr(CAST(text AS BLOB), ? + 1, ?)
+FROM document WHERE id = ?`,
+				chunk.Range.ByteStart, chunk.Range.ByteEnd-chunk.Range.ByteStart, chunk.DocumentID,
+			).Scan(&sourceLength, &sourceSlice); err != nil {
+				return errors.Wrapf(err, "load parent document source for chunk %q", chunk.ID)
 			}
-			var metadata map[string]string
-			if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
-				return errors.Wrap(err, "decode parent document metadata")
-			}
-			document := rag.Document{ID: chunk.DocumentID, SourceURI: sourceURI, Title: title, Text: text, ContentDigest: contentDigest, Metadata: metadata}
-			if err := rag.ValidateChunk(document, chunk); err != nil {
+			if err := rag.ValidateChunkSource(chunk.DocumentID, sourceLength, sourceSlice, chunk); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO chunk VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, chunk.ID, count, chunk.DocumentID, chunk.Ordinal, chunk.Range.ByteStart, chunk.Range.ByteEnd, chunk.Text, chunk.ContentDigest, chunk.Chunker); err != nil {
@@ -420,7 +421,8 @@ func streamChunks(ctx context.Context, db *sql.DB, yield func(rag.Chunk) error) 
 		rows, err := db.QueryContext(ctx, `
 SELECT c.id, c.document_id, c.document_ordinal, c.byte_start, c.byte_end,
        c.text, c.content_digest, c.chunker,
-       d.source_uri, d.title, d.text, d.content_digest, d.metadata_json
+       length(CAST(d.text AS BLOB)),
+       substr(CAST(d.text AS BLOB), c.byte_start + 1, c.byte_end - c.byte_start)
 FROM chunk c
 JOIN document d ON d.id = c.document_id
 ORDER BY c.ordinal`)
@@ -429,11 +431,17 @@ ORDER BY c.ordinal`)
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
-			chunk, document, err := scanChunkWithDocument(rows)
-			if err != nil {
+			var chunk rag.Chunk
+			var sourceLength int
+			var sourceSlice []byte
+			if err := rows.Scan(
+				&chunk.ID, &chunk.DocumentID, &chunk.Ordinal, &chunk.Range.ByteStart,
+				&chunk.Range.ByteEnd, &chunk.Text, &chunk.ContentDigest, &chunk.Chunker,
+				&sourceLength, &sourceSlice,
+			); err != nil {
 				return err
 			}
-			if err := rag.ValidateChunk(document, chunk); err != nil {
+			if err := rag.ValidateChunkSource(chunk.DocumentID, sourceLength, sourceSlice, chunk); err != nil {
 				return err
 			}
 			if yield != nil {
@@ -575,23 +583,4 @@ func scanChunk(row scanner) (rag.Chunk, error) {
 		return rag.Chunk{}, err
 	}
 	return chunk, nil
-}
-
-func scanChunkWithDocument(row scanner) (rag.Chunk, rag.Document, error) {
-	var chunk rag.Chunk
-	var document rag.Document
-	var metadataJSON string
-	if err := row.Scan(
-		&chunk.ID, &chunk.DocumentID, &chunk.Ordinal, &chunk.Range.ByteStart,
-		&chunk.Range.ByteEnd, &chunk.Text, &chunk.ContentDigest, &chunk.Chunker,
-		&document.SourceURI, &document.Title, &document.Text, &document.ContentDigest,
-		&metadataJSON,
-	); err != nil {
-		return rag.Chunk{}, rag.Document{}, err
-	}
-	document.ID = chunk.DocumentID
-	if err := json.Unmarshal([]byte(metadataJSON), &document.Metadata); err != nil {
-		return rag.Chunk{}, rag.Document{}, errors.Wrap(err, "decode chunk document metadata")
-	}
-	return chunk, document, nil
 }

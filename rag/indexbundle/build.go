@@ -181,7 +181,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		if err := vector.Close(); err != nil {
 			return BuildResult{}, errors.Wrap(err, "close bundle vector index")
 		}
-		persisted, inspectErr := sqliteexact.Inspect(filepath.Join(temporary, vectorName))
+		persisted, inspectErr := sqliteexact.InspectContext(ctx, filepath.Join(temporary, vectorName))
 		if inspectErr != nil {
 			return BuildResult{}, errors.Wrap(inspectErr, "inspect built bundle vector index")
 		}

@@ -216,7 +216,7 @@ func Open(path, model, channel string, embedder rag.Embedder) (*Index, error) {
 	if channel == "" {
 		channel = "sqlite-exact"
 	}
-	manifest, err := inspectDB(db)
+	manifest, err := inspectDB(context.Background(), db)
 	if err != nil {
 		_ = db.Close()
 		return nil, errors.Wrap(err, "inspect SQLite exact index")
@@ -233,12 +233,21 @@ func Open(path, model, channel string, embedder rag.Embedder) (*Index, error) {
 
 // Inspect returns the persisted vector identity without opening a searcher.
 func Inspect(path string) (Manifest, error) {
+	return InspectContext(context.Background(), path)
+}
+
+// InspectContext returns the persisted vector identity while honoring ctx
+// during database queries and logical-row digesting.
+func InspectContext(ctx context.Context, path string) (Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
+	}
 	db, err := sql.Open("sqlite3", sqliteURI(path, url.Values{"mode": {"ro"}}))
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "open SQLite exact index for inspection")
 	}
 	defer func() { _ = db.Close() }()
-	return inspectDB(db)
+	return inspectDB(ctx, db)
 }
 
 // ReadEntries returns all persisted vectors in stable representation-ID
@@ -249,7 +258,7 @@ func ReadEntries(ctx context.Context, path string) ([]Entry, Manifest, error) {
 		return nil, Manifest{}, errors.Wrap(err, "open SQLite exact index for reading")
 	}
 	defer func() { _ = db.Close() }()
-	manifest, err := inspectDB(db)
+	manifest, err := inspectDB(ctx, db)
 	if err != nil {
 		return nil, Manifest{}, errors.Wrap(err, "inspect SQLite exact entries")
 	}
@@ -299,11 +308,14 @@ ORDER BY representation_id`)
 	return entries, nil
 }
 
-func inspectDB(db *sql.DB) (Manifest, error) {
+func inspectDB(ctx context.Context, db *sql.DB) (Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
+	}
 	var manifest Manifest
 	manifest.Backend = "sqlite-exact"
 	manifest.Version = 1
-	row := db.QueryRow(`
+	row := db.QueryRowContext(ctx, `
 SELECT model, dimensions, COUNT(*)
 FROM embedding
 GROUP BY model, dimensions
@@ -315,7 +327,7 @@ LIMIT 1`)
 		return Manifest{}, errors.Wrap(err, "read SQLite exact identity")
 	}
 	var groups int
-	if err := db.QueryRow(`
+	if err := db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM (
  SELECT model, dimensions FROM embedding GROUP BY model, dimensions
 )`).Scan(&groups); err != nil {
@@ -326,7 +338,7 @@ SELECT COUNT(*) FROM (
 			"SQLite exact index contains %d model/dimension identities", groups,
 		)
 	}
-	contentDigest, err := digestEntriesDB(context.Background(), db, manifest.RepresentationCount)
+	contentDigest, err := digestEntriesDB(ctx, db, manifest.RepresentationCount)
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "digest SQLite exact entries")
 	}

@@ -321,7 +321,7 @@ func validateVectorBackendIdentity(ctx context.Context, data verifiedManifest) e
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		vectorManifest, err := sqliteexact.Inspect(filepath.Join(path, vectorName))
+		vectorManifest, err := sqliteexact.InspectContext(ctx, filepath.Join(path, vectorName))
 		if err != nil {
 			return errors.Wrap(err, "inspect bundle vector index")
 		}
