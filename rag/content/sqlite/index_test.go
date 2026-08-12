@@ -67,6 +67,38 @@ func TestBuildOpenAndBoundedLookups(t *testing.T) {
 	require.Equal(t, "logistics", metadata[0].Metadata["owner"])
 }
 
+func TestBuildAndInspectMultipleChunksPerDocument(t *testing.T) {
+	ctx := context.Background()
+	document := rag.Document{ID: "doc-1", Text: "alpha beta gamma", ContentDigest: digest.Text("alpha beta gamma")}
+	chunks := []rag.Chunk{
+		{ID: "chunk-1", DocumentID: document.ID, Ordinal: 0, Range: rag.Range{ByteStart: 0, ByteEnd: 5}, Text: "alpha", ContentDigest: digest.Text("alpha"), Chunker: "fixed-v1"},
+		{ID: "chunk-2", DocumentID: document.ID, Ordinal: 1, Range: rag.Range{ByteStart: 6, ByteEnd: 10}, Text: "beta", ContentDigest: digest.Text("beta"), Chunker: "fixed-v1"},
+		{ID: "chunk-3", DocumentID: document.ID, Ordinal: 2, Range: rag.Range{ByteStart: 11, ByteEnd: 16}, Text: "gamma", ContentDigest: digest.Text("gamma"), Chunker: "fixed-v1"},
+	}
+	path := t.TempDir() + "/content.sqlite"
+	result, err := Build(ctx, BuildInput{
+		Path:      path,
+		Documents: func(_ context.Context, yield func(rag.Document) error) error { return yield(document) },
+		Chunks: func(_ context.Context, yield func(rag.Chunk) error) error {
+			for _, chunk := range chunks {
+				if err := yield(chunk); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, result.Identity.ChunkCount)
+
+	index, _, err := Open(ctx, Config{Path: path})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, index.Close()) })
+	inspected, err := index.Inspect(ctx)
+	require.NoError(t, err)
+	require.Equal(t, result.Identity, inspected)
+}
+
 func TestLookupBoundsAndMissingIDsFailClosed(t *testing.T) {
 	ctx := context.Background()
 	document := rag.Document{ID: "doc-1", Text: "alpha", ContentDigest: digest.Text("alpha")}
