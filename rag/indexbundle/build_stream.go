@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-go-golems/ragkit/internal/fsutil"
+	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/pkg/errors"
@@ -88,7 +90,8 @@ func BuildStream(ctx context.Context, input StreamInput) (BuildResult, error) {
 		DocumentCount: plan.DocumentCount, ChunkCount: plan.ChunkCount,
 		RepresentationCount: plan.RepresentationCount, Chunker: input.Chunker,
 		RepresentationKinds: plan.RepresentationKinds, Lexical: plan.Lexical,
-		Vector: cloneVectorIdentity(plan.Vector),
+		Vector:  cloneVectorIdentity(plan.Vector),
+		Content: cloneContentIdentity(plan.Content),
 	}
 	if err := kernel.writeJSONArray(ctx, filepath.Join(temporary, chunksName), "chunk"); err != nil {
 		return BuildResult{}, err
@@ -97,6 +100,23 @@ func BuildStream(ctx context.Context, input StreamInput) (BuildResult, error) {
 		return BuildResult{}, err
 	}
 	observeStreamStage(input, BuildStagePayloadsWritten)
+	contentResult, err := contentsqlite.Build(ctx, contentsqlite.BuildInput{
+		Path: filepath.Join(temporary, contentName),
+		Documents: func(ctx context.Context, yield func(rag.Document) error) error {
+			return kernel.produceDocuments(ctx, yield)
+		},
+		Chunks: func(ctx context.Context, yield func(rag.Chunk) error) error {
+			return kernel.produceChunks(ctx, yield)
+		},
+	})
+	if err != nil {
+		return BuildResult{}, errors.Wrap(err, "build streamed content store")
+	}
+	if plan.Content == nil || contentResult.Identity != *plan.Content {
+		return BuildResult{}, errors.New("streamed content identity differs from sealed identity")
+	}
+	manifest.Content = cloneContentIdentity(&contentResult.Identity)
+	observeStreamStage(input, BuildStageContentBuilt)
 
 	lexical, lexicalManifest, err := bleveindex.BuildRecords(ctx, bleveindex.Config{
 		Path: filepath.Join(temporary, bleveName), Channel: plan.Lexical.Channel,

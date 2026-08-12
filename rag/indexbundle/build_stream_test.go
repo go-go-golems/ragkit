@@ -26,6 +26,7 @@ func TestBuildStreamMatchesEagerIdentityAndOpens(t *testing.T) {
 	require.Equal(t, eager.Manifest.ChunkDigest, streamed.Manifest.ChunkDigest)
 	require.Equal(t, eager.Manifest.Lexical, streamed.Manifest.Lexical)
 	require.Equal(t, eager.Manifest.Vector, streamed.Manifest.Vector)
+	require.Equal(t, eager.Manifest.Content, streamed.Manifest.Content)
 	require.NoFileExists(t, filepath.Join(streamed.Path, stagingName))
 	require.Equal(t, []BuildStage{
 		BuildStageInputValidated,
@@ -34,6 +35,7 @@ func TestBuildStreamMatchesEagerIdentityAndOpens(t *testing.T) {
 		BuildStageStagingSealed,
 		BuildStageIdentityPlanned,
 		BuildStagePayloadsWritten,
+		BuildStageContentBuilt,
 		BuildStageLexicalBuilt,
 		BuildStageVectorBuilt,
 		BuildStageManifestWritten,

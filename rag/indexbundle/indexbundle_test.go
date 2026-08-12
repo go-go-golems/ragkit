@@ -134,6 +134,7 @@ func TestBuildReportsCompletedStageBoundaries(t *testing.T) {
 		BuildStageIdentityPlanned,
 		BuildStageTemporaryCreated,
 		BuildStagePayloadsWritten,
+		BuildStageContentBuilt,
 		BuildStageLexicalBuilt,
 		BuildStageVectorBuilt,
 		BuildStageManifestWritten,

@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 type ChunkerIdentity struct {
 	Name            string `json:"name"`
@@ -41,19 +43,20 @@ type VectorIdentity struct {
 }
 
 type Manifest struct {
-	SchemaVersion       int             `json:"schema_version"`
-	BundleID            string          `json:"bundle_id"`
-	CreatedAt           time.Time       `json:"created_at"`
-	CorpusDigest        string          `json:"corpus_digest"`
-	ChunkDigest         string          `json:"chunk_digest"`
-	CorpusPath          string          `json:"corpus_path"`
-	DocumentCount       int             `json:"document_count"`
-	ChunkCount          int             `json:"chunk_count"`
-	RepresentationCount int             `json:"representation_count"`
-	Chunker             ChunkerIdentity `json:"chunker"`
-	RepresentationKinds []string        `json:"representation_kinds"`
-	Lexical             BackendIdentity `json:"lexical"`
-	Vector              *VectorIdentity `json:"vector,omitempty"`
+	SchemaVersion       int                     `json:"schema_version"`
+	BundleID            string                  `json:"bundle_id"`
+	CreatedAt           time.Time               `json:"created_at"`
+	CorpusDigest        string                  `json:"corpus_digest"`
+	ChunkDigest         string                  `json:"chunk_digest"`
+	CorpusPath          string                  `json:"corpus_path"`
+	DocumentCount       int                     `json:"document_count"`
+	ChunkCount          int                     `json:"chunk_count"`
+	RepresentationCount int                     `json:"representation_count"`
+	Chunker             ChunkerIdentity         `json:"chunker"`
+	RepresentationKinds []string                `json:"representation_kinds"`
+	Lexical             BackendIdentity         `json:"lexical"`
+	Vector              *VectorIdentity         `json:"vector,omitempty"`
+	Content             *contentsqlite.Identity `json:"content,omitempty"`
 }
 
 type BuildInput struct {
@@ -100,6 +103,7 @@ const (
 	BuildStageExistingVerified BuildStage = "existing_verified"
 	BuildStageTemporaryCreated BuildStage = "temporary_created"
 	BuildStagePayloadsWritten  BuildStage = "payloads_written"
+	BuildStageContentBuilt     BuildStage = "content_built"
 	BuildStageLexicalBuilt     BuildStage = "lexical_built"
 	BuildStageVectorBuilt      BuildStage = "vector_built"
 	BuildStageManifestWritten  BuildStage = "manifest_written"
@@ -166,6 +170,7 @@ type Bundle struct {
 	Representations []rag.Representation
 	Lexical         rag.Index
 	Vector          rag.Index
+	Content         content.Store
 
 	closeOnce sync.Once
 	closeErr  error
@@ -181,6 +186,11 @@ func (b *Bundle) Close() error {
 		}
 		if b.Vector != nil {
 			if err := b.Vector.Close(); b.closeErr == nil {
+				b.closeErr = err
+			}
+		}
+		if b.Content != nil {
+			if err := b.Content.Close(); b.closeErr == nil {
 				b.closeErr = err
 			}
 		}

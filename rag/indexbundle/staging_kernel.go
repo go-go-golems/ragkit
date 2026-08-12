@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	vectorutil "github.com/go-go-golems/ragkit/vector"
@@ -48,6 +49,7 @@ type buildPlan struct {
 	RepresentationCount  int
 	Lexical              BackendIdentity
 	Vector               *VectorIdentity
+	Content              *contentsqlite.Identity
 }
 
 // Stager is the bounded, fail-closed input boundary used by BuildStream.
@@ -259,8 +261,12 @@ func (k *stagingKernel) seal(ctx context.Context) (buildPlan, error) {
 			return buildPlan{}, errors.Wrap(err, "digest staged vector records")
 		}
 	}
+	contentIdentity, err := contentsqlite.NewIdentity(k.documents, k.chunks, corpusDigest, chunkDigest)
+	if err != nil {
+		return buildPlan{}, errors.Wrap(err, "calculate staged content identity")
+	}
 	bundleID, err := calculateIDFromDigests(
-		corpusDigest, chunkDigest, representationDigest, kinds, k.spec.Chunker, lexical, vector,
+		corpusDigest, chunkDigest, representationDigest, kinds, k.spec.Chunker, lexical, vector, &contentIdentity,
 	)
 	if err != nil {
 		return buildPlan{}, err
@@ -270,7 +276,7 @@ func (k *stagingKernel) seal(ctx context.Context) (buildPlan, error) {
 		BundleID: bundleID, CorpusDigest: corpusDigest, ChunkDigest: chunkDigest,
 		RepresentationDigest: representationDigest, RepresentationKinds: kinds,
 		DocumentCount: k.documents, ChunkCount: k.chunks, RepresentationCount: k.reps,
-		Lexical: lexical, Vector: vector,
+		Lexical: lexical, Vector: vector, Content: &contentIdentity,
 	}, nil
 }
 
@@ -356,6 +362,56 @@ ORDER BY r.id`)
 			return errors.Wrap(err, "scan staged lexical record")
 		}
 		if err := yield(record); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (k *stagingKernel) produceDocuments(ctx context.Context, yield func(rag.Document) error) error {
+	if k.phase != stagingSealed {
+		return errors.New("staging relation must be sealed before reading documents")
+	}
+	rows, err := k.db.QueryContext(ctx, `SELECT canonical_json FROM document ORDER BY ordinal`)
+	if err != nil {
+		return errors.Wrap(err, "read staged documents")
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var encoded []byte
+		if err := rows.Scan(&encoded); err != nil {
+			return errors.Wrap(err, "scan staged document")
+		}
+		var document rag.Document
+		if err := json.Unmarshal(encoded, &document); err != nil {
+			return errors.Wrap(err, "decode staged document")
+		}
+		if err := yield(document); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (k *stagingKernel) produceChunks(ctx context.Context, yield func(rag.Chunk) error) error {
+	if k.phase != stagingSealed {
+		return errors.New("staging relation must be sealed before reading chunks")
+	}
+	rows, err := k.db.QueryContext(ctx, `SELECT canonical_json FROM chunk ORDER BY ordinal`)
+	if err != nil {
+		return errors.Wrap(err, "read staged chunks")
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var encoded []byte
+		if err := rows.Scan(&encoded); err != nil {
+			return errors.Wrap(err, "scan staged chunk")
+		}
+		var chunk rag.Chunk
+		if err := json.Unmarshal(encoded, &chunk); err != nil {
+			return errors.Wrap(err, "decode staged chunk")
+		}
+		if err := yield(chunk); err != nil {
 			return err
 		}
 	}

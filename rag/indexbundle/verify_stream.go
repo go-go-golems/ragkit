@@ -174,7 +174,7 @@ func streamVerifiedStoredIdentity(ctx context.Context, state streamedChunks) (ve
 		kinds = append(kinds, kind)
 	}
 	sort.Strings(kinds)
-	expectedID, err := calculateIDFromDigests(state.manifest.CorpusDigest, state.chunkDigest, representationDigest, kinds, state.manifest.Chunker, state.manifest.Lexical, state.manifest.Vector)
+	expectedID, err := calculateIDFromDigests(state.manifest.CorpusDigest, state.chunkDigest, representationDigest, kinds, state.manifest.Chunker, state.manifest.Lexical, state.manifest.Vector, state.manifest.Content)
 	if err != nil {
 		return verifiedManifest{}, err
 	}

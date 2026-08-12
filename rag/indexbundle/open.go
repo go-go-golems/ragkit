@@ -10,6 +10,7 @@ import (
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/internal/jsonutil"
 	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/pkg/errors"
@@ -81,10 +82,24 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 			)
 		}
 	}
+	if manifest.Content == nil {
+		return nil, errors.New("schema-v2 bundle has no content identity")
+	}
+	contentIndex, contentIdentity, err := contentsqlite.Open(ctx, contentsqlite.Config{
+		Path: filepath.Join(options.Path, contentName),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "open bundle content store")
+	}
+	if contentIdentity != *manifest.Content {
+		_ = contentIndex.Close()
+		return nil, errors.New("bundle content identity differs from manifest")
+	}
 	lexical, err := bleveindex.Open(
 		filepath.Join(options.Path, bleveName), manifest.Lexical.Channel,
 	)
 	if err != nil {
+		_ = contentIndex.Close()
 		return nil, errors.Wrap(err, "open bundle lexical index")
 	}
 	observeOpenStage(options.ObserveStage, OpenStageLexicalOpened)
@@ -96,6 +111,7 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 		)
 		if err != nil {
 			_ = lexical.Close()
+			_ = contentIndex.Close()
 			return nil, errors.Wrap(err, "open bundle vector index")
 		}
 		observeOpenStage(options.ObserveStage, OpenStageVectorOpened)
@@ -103,7 +119,7 @@ func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 	bundle := &Bundle{
 		Manifest: manifest, Chunks: verified.chunks,
 		Representations: verified.representations,
-		Lexical:         lexical, Vector: vector,
+		Lexical:         lexical, Vector: vector, Content: contentIndex,
 	}
 	observeOpenStage(options.ObserveStage, OpenStageReady)
 	return bundle, nil
@@ -225,7 +241,7 @@ func validateStoredIdentity(data verifiedData) error {
 	kinds := representationKinds(data.representations)
 	expectedID, err := calculateIDFromDigests(
 		manifest.CorpusDigest, chunkDigest, representationDigest, kinds,
-		manifest.Chunker, manifest.Lexical, manifest.Vector,
+		manifest.Chunker, manifest.Lexical, manifest.Vector, manifest.Content,
 	)
 	if err != nil {
 		return err

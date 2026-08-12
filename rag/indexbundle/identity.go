@@ -5,18 +5,20 @@ import (
 
 	"github.com/go-go-golems/ragkit/digest"
 	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	"github.com/pkg/errors"
 )
 
 type identity struct {
-	SchemaVersion        int             `json:"schema_version"`
-	CorpusDigest         string          `json:"corpus_digest"`
-	ChunkDigest          string          `json:"chunk_digest"`
-	Chunker              ChunkerIdentity `json:"chunker"`
-	RepresentationKinds  []string        `json:"representation_kinds"`
-	RepresentationDigest string          `json:"representation_digest"`
-	Lexical              BackendIdentity `json:"lexical"`
-	Vector               *VectorIdentity `json:"vector,omitempty"`
+	SchemaVersion        int                     `json:"schema_version"`
+	CorpusDigest         string                  `json:"corpus_digest"`
+	ChunkDigest          string                  `json:"chunk_digest"`
+	Chunker              ChunkerIdentity         `json:"chunker"`
+	RepresentationKinds  []string                `json:"representation_kinds"`
+	RepresentationDigest string                  `json:"representation_digest"`
+	Lexical              BackendIdentity         `json:"lexical"`
+	Vector               *VectorIdentity         `json:"vector,omitempty"`
+	Content              *contentsqlite.Identity `json:"content,omitempty"`
 }
 
 func CalculateID(
@@ -44,8 +46,12 @@ func CalculateID(
 	if vectorIdentity != nil {
 		vectorIdentity.RepresentationDigest = representationDigest
 	}
+	contentIdentity, err := contentsqlite.NewIdentity(len(documents), len(chunks), corpusDigest, chunkDigest)
+	if err != nil {
+		return "", "", "", "", nil, errors.Wrap(err, "calculate bundle content identity")
+	}
 	id, err := calculateIDFromDigests(
-		corpusDigest, chunkDigest, representationDigest, kinds, chunker, lexical, vectorIdentity,
+		corpusDigest, chunkDigest, representationDigest, kinds, chunker, lexical, vectorIdentity, &contentIdentity,
 	)
 	if err != nil {
 		return "", "", "", "", nil, err
@@ -61,6 +67,7 @@ func calculateIDFromDigests(
 	chunker ChunkerIdentity,
 	lexical BackendIdentity,
 	vector *VectorIdentity,
+	content *contentsqlite.Identity,
 ) (string, error) {
 	id, err := digest.TruncatedJSON("rk-", 16, identity{
 		SchemaVersion:        SchemaVersion,
@@ -71,6 +78,7 @@ func calculateIDFromDigests(
 		RepresentationDigest: representationDigest,
 		Lexical:              lexical,
 		Vector:               vector,
+		Content:              content,
 	})
 	if err != nil {
 		return "", errors.Wrap(err, "calculate bundle ID")
@@ -92,6 +100,14 @@ func representationKinds(representations []rag.Representation) []string {
 }
 
 func cloneVectorIdentity(value *VectorIdentity) *VectorIdentity {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneContentIdentity(value *contentsqlite.Identity) *contentsqlite.Identity {
 	if value == nil {
 		return nil
 	}

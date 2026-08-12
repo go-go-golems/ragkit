@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-go-golems/ragkit/internal/fsutil"
 	"github.com/go-go-golems/ragkit/rag"
+	contentsqlite "github.com/go-go-golems/ragkit/rag/content/sqlite"
 	bleveindex "github.com/go-go-golems/ragkit/rag/lexical/bleve"
 	"github.com/go-go-golems/ragkit/rag/vector/sqliteexact"
 	"github.com/pkg/errors"
@@ -19,6 +20,7 @@ const (
 	manifestName        = "manifest.json"
 	chunksName          = "chunks.json"
 	representationsName = "representations.json"
+	contentName         = "content.sqlite"
 	bleveName           = "bleve"
 	vectorName          = "vectors.sqlite"
 )
@@ -61,6 +63,10 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 	if vectorIdentity != nil {
 		vectorIdentity.RepresentationDigest = representationDigest
 	}
+	contentIdentity, err := contentsqlite.NewIdentity(len(input.Documents), len(input.Chunks), corpusDigest, chunkDigest)
+	if err != nil {
+		return BuildResult{}, errors.Wrap(err, "calculate bundle content identity")
+	}
 	manifest := Manifest{
 		SchemaVersion: SchemaVersion, BundleID: bundleID,
 		CreatedAt: time.Now().UTC(), CorpusDigest: corpusDigest,
@@ -69,6 +75,7 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		ChunkCount: len(input.Chunks), RepresentationCount: len(input.Representations),
 		Chunker: input.Chunker, RepresentationKinds: kinds,
 		Lexical: lexicalTemplate, Vector: vectorIdentity,
+		Content: &contentIdentity,
 	}
 	observeStage(input, BuildStageIdentityPlanned)
 	finalPath := filepath.Join(input.OutputRoot, bundleID)
@@ -123,6 +130,32 @@ func Build(ctx context.Context, input BuildInput) (BuildResult, error) {
 		return BuildResult{}, err
 	}
 	observeStage(input, BuildStagePayloadsWritten)
+	contentResult, err := contentsqlite.Build(ctx, contentsqlite.BuildInput{
+		Path: filepath.Join(temporary, contentName),
+		Documents: func(ctx context.Context, yield func(rag.Document) error) error {
+			for _, document := range input.Documents {
+				if err := yield(document); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		Chunks: func(ctx context.Context, yield func(rag.Chunk) error) error {
+			for _, chunk := range input.Chunks {
+				if err := yield(chunk); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return BuildResult{}, errors.Wrap(err, "build bundle content store")
+	}
+	if contentResult.Identity != contentIdentity {
+		return BuildResult{}, errors.New("built content identity differs from planned identity")
+	}
+	observeStage(input, BuildStageContentBuilt)
 	lexical, lexicalManifest, err := bleveindex.Build(ctx, bleveindex.Config{
 		Path: filepath.Join(temporary, bleveName), Channel: "bm25",
 	}, input.Documents, input.Chunks, input.Representations)
