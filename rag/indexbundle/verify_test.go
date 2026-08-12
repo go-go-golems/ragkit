@@ -42,20 +42,37 @@ func TestVerifyRejectsExpectedIdentityMismatch(t *testing.T) {
 }
 
 func TestVerifyRejectsPersistedContentChanges(t *testing.T) {
-	input := fixtureInput(t, t.TempDir())
-	built, err := Build(t.Context(), input)
-	require.NoError(t, err)
+	t.Run("payload rows", func(t *testing.T) {
+		input := fixtureInput(t, t.TempDir())
+		built, err := Build(t.Context(), input)
+		require.NoError(t, err)
 
-	db, err := sql.Open("sqlite3", filepath.Join(built.Path, contentName))
-	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE document SET title = ? WHERE id = ?`, "Tampered", input.Documents[0].ID)
-	require.NoError(t, err)
-	require.NoError(t, db.Close())
+		db, err := sql.Open("sqlite3", filepath.Join(built.Path, contentName))
+		require.NoError(t, err)
+		_, err = db.Exec(`UPDATE document SET title = ? WHERE id = ?`, "Tampered", input.Documents[0].ID)
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
 
-	_, err = Verify(t.Context(), VerifyOptions{Path: built.Path})
-	require.ErrorContains(t, err, "content identity differs from manifest")
+		_, err = Verify(t.Context(), VerifyOptions{Path: built.Path})
+		require.ErrorContains(t, err, "content identity differs from manifest")
 
-	_, err = Build(t.Context(), input)
-	require.ErrorContains(t, err, "existing bundle identity is invalid")
-	require.ErrorContains(t, err, "content identity differs from manifest")
+		_, err = Build(t.Context(), input)
+		require.ErrorContains(t, err, "existing bundle identity is invalid")
+		require.ErrorContains(t, err, "content identity differs from manifest")
+	})
+
+	t.Run("identity row", func(t *testing.T) {
+		input := fixtureInput(t, t.TempDir())
+		built, err := Build(t.Context(), input)
+		require.NoError(t, err)
+
+		db, err := sql.Open("sqlite3", filepath.Join(built.Path, contentName))
+		require.NoError(t, err)
+		_, err = db.Exec(`UPDATE content_identity SET content_digest = ? WHERE id = 1`, "tampered")
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+
+		_, err = Verify(t.Context(), VerifyOptions{Path: built.Path})
+		require.ErrorContains(t, err, "content identity differs from manifest")
+	})
 }

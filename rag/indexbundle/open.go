@@ -266,13 +266,16 @@ func validateContentBackendIdentity(ctx context.Context, data verifiedManifest) 
 	if data.manifest.Content == nil {
 		return errors.New("schema-v2 bundle has no content identity")
 	}
-	contentIndex, _, err := contentsqlite.Open(ctx, contentsqlite.Config{
+	contentIndex, storedIdentity, err := contentsqlite.Open(ctx, contentsqlite.Config{
 		Path: filepath.Join(data.path, contentName),
 	})
 	if err != nil {
 		return errors.Wrap(err, "open bundle content store for verification")
 	}
 	defer func() { _ = contentIndex.Close() }()
+	if storedIdentity != *data.manifest.Content {
+		return errors.New("bundle content identity differs from manifest")
+	}
 	contentIdentity, err := contentIndex.Inspect(ctx)
 	if err != nil {
 		return errors.Wrap(err, "inspect bundle content")
