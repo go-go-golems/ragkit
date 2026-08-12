@@ -365,6 +365,7 @@ func Open(path, channel string) (*Index, error) {
 	// held lock into the error below instead.
 	index, err := blevelib.OpenUsing(path, map[string]interface{}{
 		"bolt_timeout": "3s",
+		"read_only":    true,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "timeout") {
