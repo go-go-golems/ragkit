@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	blevelib "github.com/blevesearch/bleve/v2"
@@ -318,6 +319,7 @@ func InspectContentDigest(ctx context.Context, path string, pageSize int) (strin
 		return "", errors.Wrap(err, "open Bleve index for content inspection")
 	}
 	defer func() { _ = index.Close() }()
+	expectedCount := strconv.Itoa(manifest.RepresentationCount)
 	count := 0
 	contentDigest, err := digest.JSONSequence(ctx, func(yield func(Record) error) error {
 		for count < manifest.RepresentationCount {
@@ -329,7 +331,7 @@ func InspectContentDigest(ctx context.Context, path string, pageSize int) (strin
 			if err != nil {
 				return errors.Wrap(err, "read Bleve records for content inspection")
 			}
-			if result.Total != uint64(manifest.RepresentationCount) {
+			if strconv.FormatUint(result.Total, 10) != expectedCount {
 				return errors.Errorf("Bleve index contains %d records, expected %d", result.Total, manifest.RepresentationCount)
 			}
 			if len(result.Hits) == 0 {

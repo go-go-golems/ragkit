@@ -281,11 +281,12 @@ func (k *stagingKernel) seal(ctx context.Context) (buildPlan, error) {
 }
 
 func stagedCanonicalDigest[T any](ctx context.Context, db *sql.DB, table string) (string, error) {
-	if table != "document" && table != "chunk" && table != "representation" {
-		return "", errors.Errorf("unsupported staged digest table %q", table)
+	query, err := stagedCanonicalJSONQuery(table)
+	if err != nil {
+		return "", err
 	}
 	return digest.JSONSequence(ctx, func(yield func(T) error) error {
-		rows, err := db.QueryContext(ctx, `SELECT canonical_json FROM `+table+` ORDER BY ordinal`)
+		rows, err := db.QueryContext(ctx, query)
 		if err != nil {
 			return err
 		}
@@ -305,6 +306,19 @@ func stagedCanonicalDigest[T any](ctx context.Context, db *sql.DB, table string)
 		}
 		return rows.Err()
 	})
+}
+
+func stagedCanonicalJSONQuery(table string) (string, error) {
+	switch table {
+	case "document":
+		return `SELECT canonical_json FROM document ORDER BY ordinal`, nil
+	case "chunk":
+		return `SELECT canonical_json FROM chunk ORDER BY ordinal`, nil
+	case "representation":
+		return `SELECT canonical_json FROM representation ORDER BY ordinal`, nil
+	default:
+		return "", errors.Errorf("unsupported staged digest table %q", table)
+	}
 }
 
 type stagedLexicalRecord struct {
@@ -490,6 +504,10 @@ func (k *stagingKernel) writeJSONArray(ctx context.Context, path, table string) 
 	if table != "chunk" && table != "representation" {
 		return errors.Errorf("unsupported staged payload table %q", table)
 	}
+	query, err := stagedCanonicalJSONQuery(table)
+	if err != nil {
+		return err
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return errors.Wrap(err, "create staged JSON payload")
@@ -504,7 +522,7 @@ func (k *stagingKernel) writeJSONArray(ctx context.Context, path, table string) 
 	if err := writer.WriteByte('['); err != nil {
 		return errors.Wrap(err, "start staged JSON payload")
 	}
-	rows, err := k.db.QueryContext(ctx, `SELECT canonical_json FROM `+table+` ORDER BY ordinal`)
+	rows, err := k.db.QueryContext(ctx, query)
 	if err != nil {
 		return errors.Wrap(err, "read staged JSON payload")
 	}
