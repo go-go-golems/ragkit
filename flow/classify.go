@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 )
 
 // ErrorClass is the destiny of one item error.

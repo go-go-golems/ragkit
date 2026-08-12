@@ -10,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 )
 
 func bulkStep(name string) Step[int, int] {

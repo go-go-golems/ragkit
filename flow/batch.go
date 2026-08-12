@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 )
 
 // BatchSpec configures batching-with-repair: many items share one provider

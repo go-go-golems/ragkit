@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/go-go-golems/ragkit/rag/embedding"
 	"github.com/go-go-golems/ragkit/rag/generation"

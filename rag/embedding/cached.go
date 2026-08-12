@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/go-go-golems/flowkit/execution"
+	"github.com/go-go-golems/flowkit/flow"
 	"github.com/go-go-golems/ragkit/digest"
-	"github.com/go-go-golems/ragkit/execution"
-	"github.com/go-go-golems/ragkit/flow"
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/flowpolicy"
 	vectorutil "github.com/go-go-golems/ragkit/vector"
 )
 
@@ -116,7 +117,7 @@ func Cached(
 		},
 		Policy: flow.Policy{
 			Workers: options.Workers,
-			Retry:   options.Retry,
+			Retry:   flowpolicy.Retry(options.Retry),
 		},
 	}
 	if options.Resource.Name != "" {

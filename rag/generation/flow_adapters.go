@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/go-go-golems/ragkit/execution"
-	"github.com/go-go-golems/ragkit/flow"
+	"github.com/go-go-golems/flowkit/execution"
+	"github.com/go-go-golems/flowkit/flow"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/pkg/errors"
 )

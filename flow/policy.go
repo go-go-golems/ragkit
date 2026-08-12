@@ -3,7 +3,7 @@ package flow
 import (
 	"time"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 )
 
 // Policy is everything about HOW a step executes. Nothing in it may affect

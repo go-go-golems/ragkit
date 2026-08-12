@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 )
 
 // Store is the swappable durability seam. It carries exactly the execution

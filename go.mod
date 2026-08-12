@@ -67,6 +67,7 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
+	github.com/go-go-golems/flowkit v0.0.0
 	github.com/go-go-golems/glazed v1.4.3 // indirect
 	github.com/go-go-golems/go-emrichen v0.0.11 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
@@ -159,3 +160,5 @@ tool (
 	github.com/go-go-golems/glazed/cmd/tools/glazed-lint
 	github.com/go-go-golems/logcopter/cmd/logcopter-gen
 )
+
+replace github.com/go-go-golems/flowkit => ../flowkit

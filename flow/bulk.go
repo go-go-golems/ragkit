@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 )
 
 // Bulk wraps a step whose provider call takes many items at once while every

@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/go-go-golems/flowkit/execution"
 	"github.com/go-go-golems/ragkit/digest"
-	"github.com/go-go-golems/ragkit/execution"
 	"github.com/go-go-golems/ragkit/rag"
 	"github.com/stretchr/testify/require"
 )
