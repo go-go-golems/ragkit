@@ -2,6 +2,7 @@ package sqliteexact
 
 import (
 	"context"
+	"encoding/binary"
 	"math"
 	"net/url"
 	"path/filepath"
@@ -9,11 +10,43 @@ import (
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
+	vectorutil "github.com/go-go-golems/ragkit/vector"
 )
 
 func TestDecodeRejectsOverflowingDimensions(t *testing.T) {
 	if _, err := decode([]byte{0, 0, 0, 0}, math.MaxInt); err == nil {
 		t.Fatal("decode accepted dimensions whose byte-size multiplication would overflow")
+	}
+}
+
+func TestCosineBlobMatchesVectorCosineWithoutDecoding(t *testing.T) {
+	query := []float32{1, 2, 3}
+	values := []float32{3, 2, 1}
+	blob := make([]byte, len(values)*4)
+	for index, value := range values {
+		binary.LittleEndian.PutUint32(blob[index*4:], math.Float32bits(value))
+	}
+	want, err := vectorutil.Cosine(query, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := cosineBlob(query, blob, len(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(got-want) > 1e-15 {
+		t.Fatalf("cosineBlob = %.17g, vector.Cosine = %.17g", got, want)
+	}
+}
+
+func TestCosineBlobRejectsInvalidAndNonFiniteVectors(t *testing.T) {
+	if _, err := cosineBlob([]float32{1}, []byte{0, 0, 0}, 1); err == nil {
+		t.Fatal("cosineBlob accepted a truncated blob")
+	}
+	nonFinite := make([]byte, 4)
+	binary.LittleEndian.PutUint32(nonFinite, math.Float32bits(float32(math.Inf(1))))
+	if _, err := cosineBlob([]float32{1}, nonFinite, 1); err == nil {
+		t.Fatal("cosineBlob accepted a non-finite vector")
 	}
 }
 

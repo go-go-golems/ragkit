@@ -429,6 +429,9 @@ func (i *Index) SearchVector(ctx context.Context, queryVector []float32, limit i
 	if limit < 1 {
 		return nil, errors.New("search limit must be positive")
 	}
+	if err := vectorutil.ValidateFinite(queryVector); err != nil {
+		return nil, errors.Wrap(err, "validate query vector")
+	}
 	rows, err := i.db.QueryContext(ctx, `SELECT representation_id, chunk_id, document_id, dimensions, values_blob FROM embedding WHERE model = ?`, i.model)
 	if err != nil {
 		return nil, errors.Wrap(err, "read SQLite vectors")
@@ -443,14 +446,7 @@ func (i *Index) SearchVector(ctx context.Context, queryVector []float32, limit i
 		if err := rows.Scan(&representationID, &chunkID, &documentID, &dimensions, &blob); err != nil {
 			return nil, errors.Wrap(err, "scan SQLite vector")
 		}
-		vector, err := decode(blob, dimensions)
-		if err != nil {
-			return nil, errors.Wrapf(err, "decode vector %q", representationID)
-		}
-		if len(vector) != len(queryVector) {
-			return nil, errors.Errorf("query dimensions %d differ from index dimensions %d", len(queryVector), len(vector))
-		}
-		score, err := vectorutil.Cosine(queryVector, vector)
+		score, err := cosineBlob(queryVector, blob, dimensions)
 		if err != nil {
 			return nil, errors.Wrapf(err, "score vector %q", representationID)
 		}
@@ -502,6 +498,36 @@ func decode(data []byte, dimensions int) ([]float32, error) {
 		values[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
 	}
 	return values, nil
+}
+
+// cosineBlob scores a little-endian float32 vector directly from its SQLite
+// blob. SearchVector uses this path so a corpus-sized query does not allocate
+// a decoded []float32 for every row. The numerical contract matches
+// vector.Cosine: float64 accumulation, finite-value rejection, and zero for a
+// zero-norm vector.
+func cosineBlob(query []float32, data []byte, dimensions int) (float64, error) {
+	if dimensions < 1 || len(data)%4 != 0 || dimensions != len(data)/4 {
+		return 0, errors.Errorf("invalid vector blob length %d for %d dimensions", len(data), dimensions)
+	}
+	if len(query) != dimensions {
+		return 0, errors.Errorf("query dimensions %d differ from index dimensions %d", len(query), dimensions)
+	}
+	var dot, queryNorm, vectorNorm float64
+	for index, queryValue := range query {
+		vectorValue := math.Float32frombits(binary.LittleEndian.Uint32(data[index*4:]))
+		if math.IsNaN(float64(vectorValue)) || math.IsInf(float64(vectorValue), 0) {
+			return 0, errors.Errorf("vector contains a non-finite component at %d", index)
+		}
+		queryFloat := float64(queryValue)
+		vectorFloat := float64(vectorValue)
+		dot += queryFloat * vectorFloat
+		queryNorm += queryFloat * queryFloat
+		vectorNorm += vectorFloat * vectorFloat
+	}
+	if queryNorm == 0 || vectorNorm == 0 {
+		return 0, nil
+	}
+	return dot / math.Sqrt(queryNorm*vectorNorm), nil
 }
 
 type hitHeap []rag.Hit
