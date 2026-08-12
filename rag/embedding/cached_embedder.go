@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/go-go-golems/ragkit/execution"
+	"github.com/go-go-golems/flowkit/execution"
 	"github.com/go-go-golems/ragkit/rag"
 	vectorutil "github.com/go-go-golems/ragkit/vector"
 	"github.com/pkg/errors"

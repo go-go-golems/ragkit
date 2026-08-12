@@ -8,8 +8,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
-	"github.com/go-go-golems/ragkit/execution"
-	"github.com/go-go-golems/ragkit/flow"
+	"github.com/go-go-golems/flowkit/execution"
+	"github.com/go-go-golems/flowkit/flow"
 	"github.com/go-go-golems/ragkit/rag"
 )
 

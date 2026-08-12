@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/go-go-golems/ragkit/execution"
-	"github.com/go-go-golems/ragkit/flow"
+	"github.com/go-go-golems/flowkit/execution"
+	"github.com/go-go-golems/flowkit/flow"
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/flowpolicy"
 	"github.com/pkg/errors"
 )
 
@@ -57,7 +58,7 @@ func FlowStep(
 				return json.Marshal(input)
 			},
 		},
-		Policy: policy,
+		Policy: flowpolicy.Policy(policy),
 		Do: func(ctx context.Context, request rag.GenerationRequest) (GenerationCacheEnvelope, error) {
 			result, err := generator.Generate(ctx, request)
 			return GenerationCacheEnvelope{Result: result}, err
