@@ -125,6 +125,8 @@ github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f/go.mod h1:vw97
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/fatih/color v1.16.0 h1:zmkK9Ngbjj+K0yRhTVONQh1p/HknKYSlNT+vZCzyokM=
 github.com/fatih/color v1.16.0/go.mod h1:fL2Sau1YI5c0pdGEVCbKQbLXB6edEj1ZgiY4NijnWvE=
+github.com/go-go-golems/flowkit v0.1.0 h1:hDm5yvv/8LVNeiRvPs1HAYLqpWXK6osRWz9EeI99Zfg=
+github.com/go-go-golems/flowkit v0.1.0/go.mod h1:wQnkd/pP76SUhadE12j2D3iOycPrGg7wyVHGkAUTbx0=
 github.com/go-go-golems/geppetto v0.13.9 h1:zQtjluKFbBTS6ZzpMa/NK4CpwNByD63Q7HGaBMDY++o=
 github.com/go-go-golems/geppetto v0.13.9/go.mod h1:nYSplWqVA3ONwVU1UgUVQ3tBSvxZ0feVH+Jsz1HRkr0=
 github.com/go-go-golems/glazed v1.4.3 h1:Wzcr/xJkNawKoT6I1KmiNYdprSNgUAbRU6EhT9PeDvM=
