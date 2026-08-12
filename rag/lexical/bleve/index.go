@@ -295,7 +295,13 @@ func validateRepresentationIDs(representations []rag.Representation) error {
 // InspectContentDigest reconstructs the canonical logical records from the
 // persisted index. It binds a bundle to indexed content, not merely to the
 // backend's record count and configuration manifest.
-func InspectContentDigest(path string) (string, error) {
+func InspectContentDigest(ctx context.Context, path string, pageSize int) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if pageSize < 1 {
+		return "", errors.New("Bleve inspection page size must be positive")
+	}
 	data, err := os.ReadFile(filepath.Join(path, "rag-manifest.json"))
 	if err != nil {
 		return "", errors.Wrap(err, "read Bleve manifest")
@@ -312,28 +318,44 @@ func InspectContentDigest(path string) (string, error) {
 		return "", errors.Wrap(err, "open Bleve index for content inspection")
 	}
 	defer func() { _ = index.Close() }()
-	request := blevelib.NewSearchRequestOptions(blevelib.NewMatchAllQuery(), manifest.RepresentationCount, 0, false)
-	request.SortBy([]string{"_id"})
-	request.Fields = []string{"representation_id", "chunk_id", "document_id", "kind", "title", "body"}
-	result, err := index.Search(request)
+	count := 0
+	contentDigest, err := digest.JSONSequence(ctx, func(yield func(Record) error) error {
+		for count < manifest.RepresentationCount {
+			size := min(pageSize, manifest.RepresentationCount-count)
+			request := blevelib.NewSearchRequestOptions(blevelib.NewMatchAllQuery(), size, count, false)
+			request.SortBy([]string{"_id"})
+			request.Fields = []string{"representation_id", "chunk_id", "document_id", "kind", "title", "body"}
+			result, err := index.SearchInContext(ctx, request)
+			if err != nil {
+				return errors.Wrap(err, "read Bleve records for content inspection")
+			}
+			if result.Total != uint64(manifest.RepresentationCount) {
+				return errors.Errorf("Bleve index contains %d records, expected %d", result.Total, manifest.RepresentationCount)
+			}
+			if len(result.Hits) == 0 {
+				return errors.Errorf("Bleve index returned no records at offset %d", count)
+			}
+			for _, hit := range result.Hits {
+				record := Record{
+					RepresentationID: stringField(hit.Fields, "representation_id", hit.ID),
+					ChunkID:          stringField(hit.Fields, "chunk_id", ""),
+					DocumentID:       stringField(hit.Fields, "document_id", ""),
+					Kind:             stringField(hit.Fields, "kind", ""),
+					Title:            stringField(hit.Fields, "title", ""),
+					Body:             stringField(hit.Fields, "body", ""),
+				}
+				if err := yield(record); err != nil {
+					return err
+				}
+				count++
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return "", errors.Wrap(err, "read Bleve records for content inspection")
+		return "", err
 	}
-	if len(result.Hits) != manifest.RepresentationCount {
-		return "", errors.Errorf("Bleve index contains %d records, expected %d", len(result.Hits), manifest.RepresentationCount)
-	}
-	records := make([]Record, 0, len(result.Hits))
-	for _, hit := range result.Hits {
-		records = append(records, Record{
-			RepresentationID: stringField(hit.Fields, "representation_id", hit.ID),
-			ChunkID:          stringField(hit.Fields, "chunk_id", ""),
-			DocumentID:       stringField(hit.Fields, "document_id", ""),
-			Kind:             stringField(hit.Fields, "kind", ""),
-			Title:            stringField(hit.Fields, "title", ""),
-			Body:             stringField(hit.Fields, "body", ""),
-		})
-	}
-	return digest.JSON(records)
+	return contentDigest, nil
 }
 
 func Open(path, channel string) (*Index, error) {

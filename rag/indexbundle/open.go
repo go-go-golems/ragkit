@@ -229,13 +229,13 @@ func validateStoredIdentity(data verifiedData) error {
 }
 
 func validateBackendIdentity(ctx context.Context, data verifiedData) error {
-	if err := validateLexicalBackendIdentity(ctx, data); err != nil {
+	if err := validateLexicalBackendIdentity(ctx, data.verifiedManifest); err != nil {
 		return err
 	}
-	return validateVectorBackendIdentity(ctx, data)
+	return validateVectorBackendIdentity(ctx, data.verifiedManifest)
 }
 
-func validateLexicalBackendIdentity(ctx context.Context, data verifiedData) error {
+func validateLexicalBackendIdentity(ctx context.Context, data verifiedManifest) error {
 	manifest := data.manifest
 	path := data.path
 	bleveData, err := os.ReadFile(filepath.Join(path, bleveName, "rag-manifest.json"))
@@ -253,7 +253,7 @@ func validateLexicalBackendIdentity(ctx context.Context, data verifiedData) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	lexicalDigest, err := bleveindex.InspectContentDigest(filepath.Join(path, bleveName))
+	lexicalDigest, err := bleveindex.InspectContentDigest(ctx, filepath.Join(path, bleveName), 512)
 	if err != nil {
 		return errors.Wrap(err, "inspect bundle lexical content")
 	}
@@ -263,7 +263,7 @@ func validateLexicalBackendIdentity(ctx context.Context, data verifiedData) erro
 	return nil
 }
 
-func validateVectorBackendIdentity(ctx context.Context, data verifiedData) error {
+func validateVectorBackendIdentity(ctx context.Context, data verifiedManifest) error {
 	manifest := data.manifest
 	path := data.path
 	if manifest.Vector != nil {

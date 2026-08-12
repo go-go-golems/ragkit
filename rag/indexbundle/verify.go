@@ -29,13 +29,13 @@ func Verify(ctx context.Context, options VerifyOptions) (Manifest, error) {
 	}
 	observeVerifyStage(options, VerifyStageManifest)
 
-	chunks, err := loadVerifiedChunks(ctx, state)
+	chunks, err := streamVerifiedChunks(ctx, state)
 	if err != nil {
 		return Manifest{}, err
 	}
 	observeVerifyStage(options, VerifyStageChunks)
 
-	verified, err := loadVerifiedStoredData(ctx, chunks)
+	verified, err := streamVerifiedStoredIdentity(ctx, chunks)
 	if err != nil {
 		return Manifest{}, err
 	}

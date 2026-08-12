@@ -100,6 +100,28 @@ func TestBuildSearchReopen(t *testing.T) {
 	}
 }
 
+func TestInspectContentDigestIsIndependentOfPageSize(t *testing.T) {
+	documents, chunks, representations := fixture()
+	path := filepath.Join(t.TempDir(), "paged.bleve")
+	index, manifest, err := Build(t.Context(), Config{Path: path}, documents, chunks, representations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireClose(t, index)
+	for _, pageSize := range []int{1, 2, 512} {
+		got, err := InspectContentDigest(t.Context(), path, pageSize)
+		if err != nil {
+			t.Fatalf("page size %d: %v", pageSize, err)
+		}
+		if got != manifest.ContentDigest {
+			t.Fatalf("page size %d digest = %q, want %q", pageSize, got, manifest.ContentDigest)
+		}
+	}
+	if _, err := InspectContentDigest(t.Context(), path, 0); err == nil {
+		t.Fatal("zero page size error = nil")
+	}
+}
+
 func TestBuildRejectsInvalidBoostsBeforeCreatingOutput(t *testing.T) {
 	documents, chunks, representations := fixture()
 	for name, boost := range map[string]float64{
