@@ -74,6 +74,9 @@ func Build(ctx context.Context, cfg Config, representations []rag.Representation
 		if !ok {
 			return nil, errors.Errorf("representation references unknown chunk %q", representation.ChunkID)
 		}
+		if vector.Model != cfg.Model {
+			return nil, errors.Errorf("vector model %q differs from configured model %q", vector.Model, cfg.Model)
+		}
 		entries = append(entries, Entry{
 			RepresentationID: representation.ID, ChunkID: chunk.ID, DocumentID: chunk.DocumentID,
 			Values: vector.Values, ContentDigest: representation.ContentDigest,

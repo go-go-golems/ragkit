@@ -41,6 +41,9 @@ func Verify(ctx context.Context, options VerifyOptions) (Manifest, error) {
 	}
 	observeVerifyStage(options, VerifyStageRepresentations)
 
+	if err := validateContentBackendIdentity(ctx, verified); err != nil {
+		return Manifest{}, err
+	}
 	if err := validateLexicalBackendIdentity(ctx, verified); err != nil {
 		return Manifest{}, err
 	}

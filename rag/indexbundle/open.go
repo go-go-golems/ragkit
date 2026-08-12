@@ -253,10 +253,34 @@ func validateStoredIdentity(data verifiedData) error {
 }
 
 func validateBackendIdentity(ctx context.Context, data verifiedData) error {
+	if err := validateContentBackendIdentity(ctx, data.verifiedManifest); err != nil {
+		return err
+	}
 	if err := validateLexicalBackendIdentity(ctx, data.verifiedManifest); err != nil {
 		return err
 	}
 	return validateVectorBackendIdentity(ctx, data.verifiedManifest)
+}
+
+func validateContentBackendIdentity(ctx context.Context, data verifiedManifest) error {
+	if data.manifest.Content == nil {
+		return errors.New("schema-v2 bundle has no content identity")
+	}
+	contentIndex, _, err := contentsqlite.Open(ctx, contentsqlite.Config{
+		Path: filepath.Join(data.path, contentName),
+	})
+	if err != nil {
+		return errors.Wrap(err, "open bundle content store for verification")
+	}
+	defer func() { _ = contentIndex.Close() }()
+	contentIdentity, err := contentIndex.Inspect(ctx)
+	if err != nil {
+		return errors.Wrap(err, "inspect bundle content")
+	}
+	if contentIdentity != *data.manifest.Content {
+		return errors.New("bundle content identity differs from manifest")
+	}
+	return nil
 }
 
 func validateLexicalBackendIdentity(ctx context.Context, data verifiedManifest) error {

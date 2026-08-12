@@ -101,6 +101,25 @@ func TestBuildSearchReopen(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsVectorModelMismatch(t *testing.T) {
+	representations := []rag.Representation{
+		{ID: "rep-a", ChunkID: "chunk-a", ContentDigest: "a"},
+	}
+	chunks := []rag.Chunk{
+		{ID: "chunk-a", DocumentID: "doc-a"},
+	}
+	vectors := []rag.Vector{
+		{RepresentationID: "rep-a", Model: "other-model", Values: []float32{1, 0}},
+	}
+
+	_, err := Build(t.Context(), Config{
+		Path: filepath.Join(t.TempDir(), "vectors.sqlite"), Model: "configured-model",
+	}, representations, chunks, vectors, fakeEmbedder{vector: []float32{1, 0}})
+	if err == nil || !strings.Contains(err.Error(), `vector model "other-model" differs from configured model "configured-model"`) {
+		t.Fatalf("model mismatch error = %v", err)
+	}
+}
+
 func TestBuildEntriesMatchesEagerManifestAndFailsClosed(t *testing.T) {
 	representations := []rag.Representation{
 		{ID: "rep-a", ChunkID: "chunk-a", ContentDigest: "a"},
