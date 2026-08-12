@@ -29,7 +29,13 @@ func Verify(ctx context.Context, options VerifyOptions) (Manifest, error) {
 	}
 	observeVerifyStage(options, VerifyStageManifest)
 
-	chunks, err := streamVerifiedChunks(ctx, state)
+	relation, err := openVerificationRelation(ctx)
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer func() { _ = relation.closeAndRemove() }()
+
+	chunks, err := streamVerifiedChunks(ctx, state, relation)
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -40,6 +46,9 @@ func Verify(ctx context.Context, options VerifyOptions) (Manifest, error) {
 		return Manifest{}, err
 	}
 	observeVerifyStage(options, VerifyStageRepresentations)
+	if err := relation.closeAndRemove(); err != nil {
+		return Manifest{}, err
+	}
 
 	if err := validateContentBackendIdentity(ctx, verified); err != nil {
 		return Manifest{}, err

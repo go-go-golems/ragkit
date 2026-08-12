@@ -17,12 +17,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-type storedChunkReference struct{ contentDigest string }
-
 type streamedChunks struct {
 	verifiedManifest
 	chunkDigest string
-	byID        map[string]storedChunkReference
+	relation    *verificationRelation
 }
 
 // streamJSONArray decodes a strict JSON array one element at a time and
@@ -84,10 +82,7 @@ func streamJSONArray[T any](ctx context.Context, path string, consume func(int, 
 	return count, contentDigest, nil
 }
 
-func streamVerifiedChunks(ctx context.Context, state verifiedManifest) (streamedChunks, error) {
-	documentIDs := make(map[string]struct{})
-	chunkIDs := make(map[string]storedChunkReference, state.manifest.ChunkCount)
-	ordinals := make(map[string]map[int]struct{}, state.manifest.DocumentCount)
+func streamVerifiedChunks(ctx context.Context, state verifiedManifest, relation *verificationRelation) (streamedChunks, error) {
 	count, chunkDigest, err := streamJSONArray[rag.Chunk](ctx, filepath.Join(state.path, chunksName), func(_ int, chunk rag.Chunk) error {
 		if chunk.ID == "" || chunk.DocumentID == "" || chunk.ContentDigest == "" {
 			return errors.New("bundle contains an invalid chunk identity")
@@ -98,50 +93,46 @@ func streamVerifiedChunks(ctx context.Context, state verifiedManifest) (streamed
 		if chunk.Range.ByteStart < 0 || chunk.Range.ByteEnd < chunk.Range.ByteStart || chunk.Range.ByteEnd-chunk.Range.ByteStart != len([]byte(chunk.Text)) {
 			return errors.Errorf("bundle chunk %q has an invalid stored byte range", chunk.ID)
 		}
-		if _, duplicate := chunkIDs[chunk.ID]; duplicate {
-			return errors.Errorf("bundle contains duplicate chunk %q", chunk.ID)
-		}
 		if chunk.Ordinal < 0 {
 			return errors.Errorf("bundle chunk %q has negative ordinal %d", chunk.ID, chunk.Ordinal)
 		}
-		if ordinals[chunk.DocumentID] == nil {
-			ordinals[chunk.DocumentID] = map[int]struct{}{}
-		}
-		if _, duplicate := ordinals[chunk.DocumentID][chunk.Ordinal]; duplicate {
-			return errors.Errorf("bundle contains duplicate ordinal %d for document %q", chunk.Ordinal, chunk.DocumentID)
-		}
-		ordinals[chunk.DocumentID][chunk.Ordinal] = struct{}{}
-		chunkIDs[chunk.ID] = storedChunkReference{contentDigest: chunk.ContentDigest}
-		documentIDs[chunk.DocumentID] = struct{}{}
-		return nil
+		return relation.addChunk(ctx, chunk.ID, chunk.DocumentID, chunk.Ordinal, chunk.ContentDigest)
 	})
 	if err != nil {
 		return streamedChunks{}, errors.Wrap(err, "stream bundle chunks")
 	}
+	if err := relation.finishChunks(ctx); err != nil {
+		return streamedChunks{}, err
+	}
 	if count != state.manifest.ChunkCount {
 		return streamedChunks{}, errors.Errorf("bundle data counts differ from manifest: holds %d chunks but manifest counts %d", count, state.manifest.ChunkCount)
 	}
-	if len(documentIDs) > state.manifest.DocumentCount {
+	documentCount, err := relation.documentCount(ctx)
+	if err != nil {
+		return streamedChunks{}, err
+	}
+	if documentCount > state.manifest.DocumentCount {
 		return streamedChunks{}, errors.New("bundle chunk document count exceeds manifest corpus count")
 	}
 	if chunkDigest != state.manifest.ChunkDigest {
 		return streamedChunks{}, errors.New("bundle chunk digest differs from manifest")
 	}
-	return streamedChunks{verifiedManifest: state, chunkDigest: chunkDigest, byID: chunkIDs}, nil
+	return streamedChunks{verifiedManifest: state, chunkDigest: chunkDigest, relation: relation}, nil
 }
 
 func streamVerifiedStoredIdentity(ctx context.Context, state streamedChunks) (verifiedManifest, error) {
-	seen := make(map[string]struct{}, state.manifest.RepresentationCount)
 	kindSet := make(map[string]struct{}, len(state.manifest.RepresentationKinds))
 	count, representationDigest, err := streamJSONArray[rag.Representation](ctx, filepath.Join(state.path, representationsName), func(index int, representation rag.Representation) error {
 		if strings.TrimSpace(representation.ID) == "" {
 			return errors.Errorf("representation %d has no ID", index)
 		}
-		if _, duplicate := seen[representation.ID]; duplicate {
-			return errors.Errorf("duplicate representation ID %q", representation.ID)
+		if err := state.relation.addRepresentation(ctx, representation.ID); err != nil {
+			return err
 		}
-		seen[representation.ID] = struct{}{}
-		chunk, exists := state.byID[representation.ChunkID]
+		chunkContentDigest, exists, err := state.relation.chunkContentDigest(ctx, representation.ChunkID)
+		if err != nil {
+			return err
+		}
 		if !exists {
 			return errors.Errorf("representation %q references unknown chunk %q", representation.ID, representation.ChunkID)
 		}
@@ -157,7 +148,7 @@ func streamVerifiedStoredIdentity(ctx context.Context, state streamedChunks) (ve
 		if actual := digest.Text(representation.Text); actual != representation.ContentDigest {
 			return errors.Errorf("representation %q content digest mismatch: stored=%s actual=%s", representation.ID, representation.ContentDigest, actual)
 		}
-		if representation.Kind == "raw" && representation.ContentDigest != chunk.contentDigest {
+		if representation.Kind == "raw" && representation.ContentDigest != chunkContentDigest {
 			return errors.Errorf("raw representation %q differs from chunk %q", representation.ID, representation.ChunkID)
 		}
 		kindSet[representation.Kind] = struct{}{}
@@ -165,6 +156,9 @@ func streamVerifiedStoredIdentity(ctx context.Context, state streamedChunks) (ve
 	})
 	if err != nil {
 		return verifiedManifest{}, errors.Wrap(err, "stream bundle representations")
+	}
+	if err := state.relation.finishRepresentations(ctx); err != nil {
+		return verifiedManifest{}, err
 	}
 	if count != state.manifest.RepresentationCount {
 		return verifiedManifest{}, errors.New("bundle representation count differs from manifest")
