@@ -88,6 +88,13 @@ type StreamInput struct {
 	BatchSize     int
 	Produce       func(context.Context, *Stager) error
 	ObserveStage  func(BuildStage)
+	// ScratchDirectory is the writable directory used for verifier-owned
+	// disk-backed scratch storage when an identical build reuses an existing
+	// immutable bundle. It is required: BuildStream fails closed when it is
+	// empty so a late permission failure cannot occur after expensive
+	// staging and sealing. Callers should pass a directory they own and
+	// have prepared (see PreflightScratch).
+	ScratchDirectory string
 }
 
 // BuildStage identifies a completed, externally meaningful bundle-build
@@ -96,19 +103,21 @@ type StreamInput struct {
 type BuildStage string
 
 const (
-	BuildStageInputValidated   BuildStage = "input_validated"
-	BuildStageStagingProduced  BuildStage = "staging_produced"
-	BuildStageStagingSealed    BuildStage = "staging_sealed"
-	BuildStageIdentityPlanned  BuildStage = "identity_planned"
-	BuildStageExistingVerified BuildStage = "existing_verified"
-	BuildStageTemporaryCreated BuildStage = "temporary_created"
-	BuildStagePayloadsWritten  BuildStage = "payloads_written"
-	BuildStageContentBuilt     BuildStage = "content_built"
-	BuildStageLexicalBuilt     BuildStage = "lexical_built"
-	BuildStageVectorBuilt      BuildStage = "vector_built"
-	BuildStageManifestWritten  BuildStage = "manifest_written"
-	BuildStageBundlePublished  BuildStage = "bundle_published"
-	BuildStageResultMeasured   BuildStage = "result_measured"
+	BuildStageInputValidated              BuildStage = "input_validated"
+	BuildStageStagingProduced             BuildStage = "staging_produced"
+	BuildStageStagingSealed               BuildStage = "staging_sealed"
+	BuildStageIdentityPlanned             BuildStage = "identity_planned"
+	BuildStageDestinationAbsent           BuildStage = "destination_absent"
+	BuildStageExistingVerificationStarted BuildStage = "existing_verification_started"
+	BuildStageExistingVerified            BuildStage = "existing_verified"
+	BuildStageTemporaryCreated            BuildStage = "temporary_created"
+	BuildStagePayloadsWritten             BuildStage = "payloads_written"
+	BuildStageContentBuilt                BuildStage = "content_built"
+	BuildStageLexicalBuilt                BuildStage = "lexical_built"
+	BuildStageVectorBuilt                 BuildStage = "vector_built"
+	BuildStageManifestWritten             BuildStage = "manifest_written"
+	BuildStageBundlePublished             BuildStage = "bundle_published"
+	BuildStageResultMeasured              BuildStage = "result_measured"
 )
 
 // VerifyStage identifies a completed, externally meaningful existing-bundle
@@ -145,6 +154,12 @@ type VerifyOptions struct {
 	ExpectedBundleID   string
 	ExpectedCorpusPath string
 	ObserveStage       func(VerifyStage)
+	// ScratchDirectory is the writable directory used for verifier-owned
+	// disk-backed scratch storage. It is required: Verify fails closed when
+	// it is empty so the verification relation is never created through Go's
+	// default temporary directory (os.TempDir/TMPDIR), which may be unwritable
+	// under a read-only root or an unowned mounted volume.
+	ScratchDirectory string
 }
 
 type BuildResult struct {
@@ -162,6 +177,10 @@ type OpenOptions struct {
 	EmbeddingModel      string
 	EmbeddingDimensions int
 	ObserveStage        func(OpenStage)
+	// ScratchDirectory is the writable directory used for verifier-owned
+	// disk-backed scratch storage during startup verification. It is
+	// required for the same reason as VerifyOptions.ScratchDirectory.
+	ScratchDirectory string
 }
 
 type Bundle struct {

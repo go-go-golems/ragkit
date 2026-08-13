@@ -34,6 +34,7 @@ func TestBuildStreamMatchesEagerIdentityAndOpens(t *testing.T) {
 		BuildStageStagingProduced,
 		BuildStageStagingSealed,
 		BuildStageIdentityPlanned,
+		BuildStageDestinationAbsent,
 		BuildStagePayloadsWritten,
 		BuildStageContentBuilt,
 		BuildStageLexicalBuilt,
@@ -46,6 +47,7 @@ func TestBuildStreamMatchesEagerIdentityAndOpens(t *testing.T) {
 	bundle, err := Open(t.Context(), OpenOptions{
 		Path: streamed.Path, QueryEmbedder: eagerInput.QueryEmbedder,
 		EmbeddingProvider: "hash", EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
+		ScratchDirectory: filepath.Join(streamInput.OutputRoot, "tmp"),
 	})
 	require.NoError(t, err)
 	hits, err := bundle.Lexical.Search(t.Context(), rag.Query{Text: "lobed leaves"}, 5)
@@ -84,7 +86,8 @@ func streamFixture(eager BuildInput, outputRoot string, batchSize int) StreamInp
 	return StreamInput{
 		OutputRoot: outputRoot, CorpusPath: eager.CorpusPath, Chunker: eager.Chunker,
 		Embedding: cloneVectorIdentity(eager.Embedding), QueryEmbedder: eager.QueryEmbedder,
-		BatchSize: batchSize,
+		BatchSize:        batchSize,
+		ScratchDirectory: filepath.Join(outputRoot, "tmp"),
 		Produce: func(ctx context.Context, stager *Stager) error {
 			if err := addBatches(ctx, eager.Documents, batchSize, stager.AddDocuments); err != nil {
 				return err

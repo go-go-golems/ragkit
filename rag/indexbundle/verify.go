@@ -13,6 +13,9 @@ func Verify(ctx context.Context, options VerifyOptions) (Manifest, error) {
 	if err := ctx.Err(); err != nil {
 		return Manifest{}, err
 	}
+	if strings.TrimSpace(options.ScratchDirectory) == "" {
+		return Manifest{}, errors.New("bundle verification scratch directory is required")
+	}
 	if strings.TrimSpace(options.Path) == "" {
 		return Manifest{}, errors.New("bundle verification path is required")
 	}
@@ -29,7 +32,7 @@ func Verify(ctx context.Context, options VerifyOptions) (Manifest, error) {
 	}
 	observeVerifyStage(options, VerifyStageManifest)
 
-	relation, err := openVerificationRelation(ctx)
+	relation, err := openVerificationRelation(ctx, options.ScratchDirectory)
 	if err != nil {
 		return Manifest{}, err
 	}
