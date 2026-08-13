@@ -66,11 +66,12 @@ func BuildStream(ctx context.Context, input StreamInput) (BuildResult, error) {
 
 	finalPath := filepath.Join(input.OutputRoot, plan.BundleID)
 	if _, statErr := os.Stat(finalPath); statErr == nil {
+		observeStreamStage(input, BuildStageExistingVerificationStarted)
 		if err := kernel.close(); err != nil {
 			return BuildResult{}, errors.Wrap(err, "close streamed staging database")
 		}
 		kernelClosed = true
-		existing, err := verifyExistingStreamedBundle(ctx, finalPath, plan.BundleID, input.CorpusPath)
+		existing, err := verifyExistingStreamedBundle(ctx, finalPath, plan.BundleID, input.CorpusPath, input.ScratchDirectory)
 		if err != nil {
 			return BuildResult{}, err
 		}
@@ -83,6 +84,7 @@ func BuildStream(ctx context.Context, input StreamInput) (BuildResult, error) {
 	} else if !os.IsNotExist(statErr) {
 		return BuildResult{}, errors.Wrap(statErr, "inspect streamed bundle destination")
 	}
+	observeStreamStage(input, BuildStageDestinationAbsent)
 
 	manifest := Manifest{
 		SchemaVersion: SchemaVersion, BundleID: plan.BundleID, CreatedAt: time.Now().UTC(),
@@ -195,6 +197,9 @@ func validateStreamInput(ctx context.Context, input StreamInput) error {
 	if strings.TrimSpace(input.OutputRoot) == "" || strings.TrimSpace(input.CorpusPath) == "" {
 		return errors.New("streamed bundle output root and corpus path are required")
 	}
+	if strings.TrimSpace(input.ScratchDirectory) == "" {
+		return errors.New("streamed bundle scratch directory is required")
+	}
 	if input.BatchSize < 1 || input.Produce == nil {
 		return errors.New("streamed bundle batch size and producer are required")
 	}
@@ -219,9 +224,10 @@ func validateStreamInput(ctx context.Context, input StreamInput) error {
 	return nil
 }
 
-func verifyExistingStreamedBundle(ctx context.Context, path, bundleID, corpusPath string) (Manifest, error) {
+func verifyExistingStreamedBundle(ctx context.Context, path, bundleID, corpusPath, scratchDirectory string) (Manifest, error) {
 	manifest, err := Verify(ctx, VerifyOptions{
 		Path: path, ExpectedBundleID: bundleID, ExpectedCorpusPath: corpusPath,
+		ScratchDirectory: scratchDirectory,
 	})
 	if err != nil {
 		return Manifest{}, errors.Wrap(err, "existing streamed bundle is invalid")

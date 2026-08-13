@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -35,7 +36,8 @@ func TestBuildStreamSyntheticShape(t *testing.T) {
 	var maximumHeapInuse uint64
 	input := StreamInput{
 		OutputRoot: t.TempDir(), CorpusPath: "synthetic/corpus.json", BatchSize: *syntheticBatchSize,
-		Chunker: ChunkerIdentity{Name: "synthetic", MaximumRunes: 1024},
+		ScratchDirectory: filepath.Join(t.TempDir(), "tmp"),
+		Chunker:          ChunkerIdentity{Name: "synthetic", MaximumRunes: 1024},
 		Embedding: &VectorIdentity{
 			Backend: "sqlite-exact", Version: 1, Channel: "vector", Provider: "synthetic",
 			Model: "synthetic", Dimensions: *syntheticDimensions,

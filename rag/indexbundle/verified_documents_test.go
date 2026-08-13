@@ -66,7 +66,8 @@ func TestLoadVerifiedDocumentsLoadsManifestCorpusUnderRoot(t *testing.T) {
 func TestLoadVerifiedDocumentsWhileBundleIsOpen(t *testing.T) {
 	root, bundlePath, _ := verifiedDocumentsFixture(t)
 	bundle, err := Open(t.Context(), OpenOptions{
-		Path: bundlePath, QueryEmbedder: &embedding.HashEmbedder{Dimensions: 16},
+		ScratchDirectory: t.TempDir(),
+		Path:             bundlePath, QueryEmbedder: &embedding.HashEmbedder{Dimensions: 16},
 		EmbeddingProvider: "hash", EmbeddingModel: "hash-v1-d16", EmbeddingDimensions: 16,
 	})
 	if err != nil {

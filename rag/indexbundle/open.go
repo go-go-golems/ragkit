@@ -37,7 +37,8 @@ func LoadManifest(path string) (Manifest, error) {
 
 func Open(ctx context.Context, options OpenOptions) (*Bundle, error) {
 	manifest, err := Verify(ctx, VerifyOptions{
-		Path: options.Path,
+		Path:             options.Path,
+		ScratchDirectory: options.ScratchDirectory,
 		ObserveStage: func(stage VerifyStage) {
 			switch stage {
 			case VerifyStageManifest:
