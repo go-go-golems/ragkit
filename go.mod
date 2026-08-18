@@ -1,6 +1,8 @@
 module github.com/go-go-golems/ragkit
 
-go 1.26.5
+go 1.26.3
+
+toolchain go1.26.6
 
 require (
 	github.com/blevesearch/bleve/v2 v2.6.0
