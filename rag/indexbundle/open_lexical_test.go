@@ -44,7 +44,7 @@ func TestLexicalOnlyBundleBuildsAndOpens(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, result.Reused)
 
-	bundle, err := Open(ctx, OpenOptions{Path: result.Path})
+	bundle, err := Open(ctx, OpenOptions{Path: result.Path, ScratchDirectory: t.TempDir()})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, bundle.Close()) }()
 	require.Nil(t, bundle.Vector)

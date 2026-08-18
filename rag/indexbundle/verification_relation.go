@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/url"
 	"os"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
@@ -30,8 +31,14 @@ const (
 	verificationRepresentations
 )
 
-func openVerificationRelation(ctx context.Context) (*verificationRelation, error) {
-	file, err := os.CreateTemp("", ".ragkit-verify-*.sqlite")
+func openVerificationRelation(ctx context.Context, scratchDirectory string) (*verificationRelation, error) {
+	if strings.TrimSpace(scratchDirectory) == "" {
+		return nil, errors.New("bundle verification scratch directory is required")
+	}
+	if err := os.MkdirAll(scratchDirectory, 0o700); err != nil {
+		return nil, errors.Wrap(err, "create bundle verification scratch directory")
+	}
+	file, err := os.CreateTemp(scratchDirectory, ".ragkit-verify-*.sqlite")
 	if err != nil {
 		return nil, errors.Wrap(err, "create bundle verification relation")
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 func TestVerificationRelationPersistsExactIdentitiesAcrossBatches(t *testing.T) {
-	relation, err := openVerificationRelation(t.Context())
+	relation, err := openVerificationRelation(t.Context(), t.TempDir())
 	require.NoError(t, err)
 	path := relation.path
 	t.Cleanup(func() { _ = relation.closeAndRemove() })
@@ -39,7 +39,7 @@ func TestVerificationRelationPersistsExactIdentitiesAcrossBatches(t *testing.T) 
 
 func TestVerificationRelationRejectsDuplicateIdentities(t *testing.T) {
 	t.Run("chunk ID", func(t *testing.T) {
-		relation, err := openVerificationRelation(t.Context())
+		relation, err := openVerificationRelation(t.Context(), t.TempDir())
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = relation.closeAndRemove() })
 		require.NoError(t, relation.addChunk(t.Context(), "chunk", "doc-a", 0, "digest"))
@@ -48,7 +48,7 @@ func TestVerificationRelationRejectsDuplicateIdentities(t *testing.T) {
 	})
 
 	t.Run("document ordinal", func(t *testing.T) {
-		relation, err := openVerificationRelation(t.Context())
+		relation, err := openVerificationRelation(t.Context(), t.TempDir())
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = relation.closeAndRemove() })
 		require.NoError(t, relation.addChunk(t.Context(), "chunk-a", "doc", 0, "digest"))
@@ -57,7 +57,7 @@ func TestVerificationRelationRejectsDuplicateIdentities(t *testing.T) {
 	})
 
 	t.Run("representation ID", func(t *testing.T) {
-		relation, err := openVerificationRelation(t.Context())
+		relation, err := openVerificationRelation(t.Context(), t.TempDir())
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = relation.closeAndRemove() })
 		require.NoError(t, relation.finishChunks(t.Context()))
@@ -68,7 +68,7 @@ func TestVerificationRelationRejectsDuplicateIdentities(t *testing.T) {
 }
 
 func TestVerificationRelationHonorsCancellationAndCleansUp(t *testing.T) {
-	relation, err := openVerificationRelation(t.Context())
+	relation, err := openVerificationRelation(t.Context(), t.TempDir())
 	require.NoError(t, err)
 	path := relation.path
 
