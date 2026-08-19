@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
 )
 
 const (
@@ -141,7 +142,7 @@ type Prepared struct {
 // answer preparation. Implementations must preserve baseline results when
 // their admission gate is closed.
 type RetrievalAugmenter interface {
-	Augment(context.Context, RetrievalResult, []rag.Chunk) (RetrievalResult, json.RawMessage, error)
+	Augment(context.Context, RetrievalResult, content.Store) (RetrievalResult, json.RawMessage, error)
 }
 
 // CitationStyle controls only the IDs presented to the generation model.

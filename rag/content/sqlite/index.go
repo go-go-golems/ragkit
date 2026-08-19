@@ -23,7 +23,7 @@ import (
 const (
 	Backend         = "sqlite-content"
 	ManifestVersion = 1
-	DefaultMaxBatch = 256
+	DefaultMaxBatch = content.DefaultMaxBatch
 )
 
 // Identity binds the logical content rows to a bundle manifest. The digest is
@@ -524,6 +524,13 @@ WHERE c.id = ?`, id).Scan(&candidate.ChunkID, &candidate.DocumentID, &metadataJS
 		result = append(result, candidate)
 	}
 	return result, nil
+}
+
+func (i *Index) MaxBatchSize() int {
+	if i == nil {
+		return 0
+	}
+	return i.maxBatch
 }
 
 func (i *Index) validateIDs(ids []string) error {

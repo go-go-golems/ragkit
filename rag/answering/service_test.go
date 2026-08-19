@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
 	"github.com/stretchr/testify/require"
 )
 
@@ -100,6 +101,14 @@ func (g *fixedGenerator) Generate(_ context.Context, request rag.GenerationReque
 	return g.result, g.err
 }
 
+func memoryContent(chunks []rag.Chunk) content.Store {
+	store, err := content.NewMemory(nil, chunks)
+	if err != nil {
+		panic(err)
+	}
+	return store
+}
+
 func serviceFixture() (*Service, *fixedSearcher, *fixedSearcher) {
 	lexical := &fixedSearcher{hits: []rag.Hit{
 		{RepresentationID: "rep-a-summary", ChunkID: "chunk-a", DocumentID: "doc-a", Channel: "bm25", Rank: 2, Score: 0.8},
@@ -113,11 +122,11 @@ func serviceFixture() (*Service, *fixedSearcher, *fixedSearcher) {
 	return &Service{
 		Lexical: lexical,
 		Vector:  vector,
-		Chunks: []rag.Chunk{
+		Content: memoryContent([]rag.Chunk{
 			{ID: "chunk-a", DocumentID: "doc-a", Text: "a"},
 			{ID: "chunk-b", DocumentID: "doc-b", Text: "b"},
 			{ID: "chunk-c", DocumentID: "doc-c", Text: "c"},
-		},
+		}),
 		GenerationModel: "generator",
 		Prompt:          "answer from evidence",
 		OutputSchema:    `{"type":"object"}`,
@@ -340,7 +349,7 @@ func TestInterpretUsesPreparedCitationStyle(t *testing.T) {
 
 type traceAugmenter struct{}
 
-func (traceAugmenter) Augment(_ context.Context, result RetrievalResult, _ []rag.Chunk) (RetrievalResult, json.RawMessage, error) {
+func (traceAugmenter) Augment(_ context.Context, result RetrievalResult, _ content.Store) (RetrievalResult, json.RawMessage, error) {
 	result.Strategy = "augmented"
 	return result, json.RawMessage(`{"gate":"closed"}`), nil
 }
@@ -356,7 +365,7 @@ func TestRetrievePersistsOpaqueAugmentationTrace(t *testing.T) {
 
 type tamperingAugmenter struct{ evidence []rag.Evidence }
 
-func (a tamperingAugmenter) Augment(_ context.Context, result RetrievalResult, _ []rag.Chunk) (RetrievalResult, json.RawMessage, error) {
+func (a tamperingAugmenter) Augment(_ context.Context, result RetrievalResult, _ content.Store) (RetrievalResult, json.RawMessage, error) {
 	result.Evidence = a.evidence
 	return result, nil, nil
 }
@@ -373,7 +382,7 @@ func TestRetrieveRejectsUnknownAugmenterEvidence(t *testing.T) {
 	service, _, _ := serviceFixture()
 	service.Augmenter = tamperingAugmenter{evidence: []rag.Evidence{{Chunk: rag.Chunk{ID: "unknown"}}}}
 	_, err := service.Retrieve(t.Context(), requestFixture(StrategyBM25))
-	require.ErrorContains(t, err, "unknown chunk")
+	require.ErrorContains(t, err, "load augmenter chunks")
 }
 
 func TestRetrieveRejectsNonFiniteAugmenterScores(t *testing.T) {
@@ -410,6 +419,9 @@ func TestValidateRequestRejectsMissingDependenciesAndInvalidLimits(t *testing.T)
 	service := &Service{}
 	err := service.ValidateRequest(requestFixture(StrategyVector))
 	require.ErrorContains(t, err, "vector searcher")
+
+	service = &Service{Lexical: &fixedSearcher{}}
+	require.ErrorContains(t, service.ValidateRequest(requestFixture(StrategyBM25)), "content store")
 
 	service, _, _ = serviceFixture()
 	request := requestFixture(StrategyBM25)
