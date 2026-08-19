@@ -168,7 +168,7 @@ func HydrateFromStore(ctx context.Context, hits []rag.FusedHit, store content.St
 		requested[hit.ChunkID] = struct{}{}
 		ids = append(ids, hit.ChunkID)
 	}
-	chunks, err := store.Chunks(ctx, ids)
+	chunks, err := content.LoadChunks(ctx, store, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load hydration chunks: %w", err)
 	}

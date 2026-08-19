@@ -750,7 +750,7 @@ func loadReferencedChunks(ctx context.Context, store content.Store, ids []string
 	if len(ids) == 0 {
 		return map[string]rag.Chunk{}, nil
 	}
-	chunks, err := store.Chunks(ctx, ids)
+	chunks, err := content.LoadChunks(ctx, store, ids)
 	if err != nil {
 		return nil, errors.Wrapf(err, "load %s chunks", role)
 	}

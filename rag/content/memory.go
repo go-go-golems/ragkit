@@ -9,8 +9,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const defaultMemoryMaxBatch = 256
-
 // Memory is a bounded Store for in-memory experiments and deterministic tests.
 // Production serving bundles use the SQLite implementation; Memory exists for
 // callers that already own an explicit corpus slice and still need to exercise
@@ -32,7 +30,7 @@ func NewMemory(documents []rag.Document, chunks []rag.Chunk) (*Memory, error) {
 	store := &Memory{
 		documents: make(map[string]rag.Document, len(documents)),
 		chunks:    make(map[string]rag.Chunk, len(chunks)),
-		maxBatch:  defaultMemoryMaxBatch,
+		maxBatch:  DefaultMaxBatch,
 	}
 	for _, document := range documents {
 		if strings.TrimSpace(document.ID) == "" {
@@ -41,6 +39,7 @@ func NewMemory(documents []rag.Document, chunks []rag.Chunk) (*Memory, error) {
 		if _, duplicate := store.documents[document.ID]; duplicate {
 			return nil, errors.Errorf("memory content contains duplicate document %q", document.ID)
 		}
+		document.Metadata = cloneMetadata(document.Metadata)
 		store.documents[document.ID] = document
 	}
 	for _, chunk := range chunks {
@@ -67,6 +66,7 @@ func (m *Memory) Documents(ctx context.Context, ids []string) ([]rag.Document, e
 		if !ok {
 			return nil, errors.Errorf("load memory content document %q: not found", id)
 		}
+		document.Metadata = cloneMetadata(document.Metadata)
 		result = append(result, document)
 	}
 	return result, nil
@@ -111,6 +111,15 @@ func (m *Memory) CandidateMetadata(ctx context.Context, ids []string) ([]Candida
 		})
 	}
 	return result, nil
+}
+
+func (m *Memory) MaxBatchSize() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.maxBatch
 }
 
 func (m *Memory) Close() error {

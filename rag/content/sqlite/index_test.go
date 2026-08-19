@@ -122,6 +122,7 @@ func TestLookupBoundsAndMissingIDsFailClosed(t *testing.T) {
 	index, _, err := Open(ctx, Config{Path: path, MaxBatch: 1})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, index.Close()) })
+	require.Equal(t, 1, index.MaxBatchSize())
 
 	_, err = index.Chunks(ctx, []string{"chunk-1", "chunk-1"})
 	require.Error(t, err)

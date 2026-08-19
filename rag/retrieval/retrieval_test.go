@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -27,6 +28,22 @@ func TestHydrateFromStoreLoadsOnlyBoundedCandidates(t *testing.T) {
 	require.ErrorContains(t, err, "missing")
 	_, err = HydrateFromStore(t.Context(), []rag.FusedHit{{ChunkID: "a"}, {ChunkID: "a"}}, store, 2)
 	require.ErrorContains(t, err, "duplicate fused chunk")
+}
+
+func TestHydrateFromStoreSplitsLargeCandidateSets(t *testing.T) {
+	chunks := make([]rag.Chunk, content.DefaultMaxBatch+1)
+	hits := make([]rag.FusedHit, len(chunks))
+	for index := range chunks {
+		id := fmt.Sprintf("chunk-%03d", index)
+		chunks[index] = rag.Chunk{ID: id, DocumentID: "doc", Text: id}
+		hits[index] = rag.FusedHit{ChunkID: id, Rank: index + 1, Score: float64(len(chunks) - index)}
+	}
+	store, err := content.NewMemory(nil, chunks)
+	require.NoError(t, err)
+	evidence, err := HydrateFromStore(t.Context(), hits, store, len(hits))
+	require.NoError(t, err)
+	require.Len(t, evidence, len(hits))
+	require.Equal(t, hits[len(hits)-1].ChunkID, evidence[len(evidence)-1].Chunk.ID)
 }
 
 func TestCollapseAndRRF(t *testing.T) {
