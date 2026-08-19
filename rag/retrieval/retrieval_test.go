@@ -5,8 +5,29 @@ import (
 	"testing"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHydrateFromStoreLoadsOnlyBoundedCandidates(t *testing.T) {
+	store, err := content.NewMemory(nil, []rag.Chunk{
+		{ID: "a", DocumentID: "doc-a", Text: "alpha"},
+		{ID: "b", DocumentID: "doc-b", Text: "bravo"},
+		{ID: "c", DocumentID: "doc-c", Text: "charlie"},
+	})
+	require.NoError(t, err)
+	evidence, err := HydrateFromStore(t.Context(), []rag.FusedHit{
+		{ChunkID: "b", Score: 0.9}, {ChunkID: "a", Score: 0.8}, {ChunkID: "c", Score: 0.7},
+	}, store, 2)
+	require.NoError(t, err)
+	require.Equal(t, []string{"b", "a"}, []string{evidence[0].Chunk.ID, evidence[1].Chunk.ID})
+	require.Equal(t, []int{1, 2}, []int{evidence[0].Rank, evidence[1].Rank})
+
+	_, err = HydrateFromStore(t.Context(), []rag.FusedHit{{ChunkID: "missing"}}, store, 1)
+	require.ErrorContains(t, err, "missing")
+	_, err = HydrateFromStore(t.Context(), []rag.FusedHit{{ChunkID: "a"}, {ChunkID: "a"}}, store, 2)
+	require.ErrorContains(t, err, "duplicate fused chunk")
+}
 
 func TestCollapseAndRRF(t *testing.T) {
 	t.Parallel()

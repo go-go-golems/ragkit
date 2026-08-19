@@ -34,10 +34,10 @@ func querygenFixture(generated string, generr error) (*Service, *recordingSearch
 		Generator: &fixedGenerator{
 			result: rag.GenerationResult{Text: generated}, err: generr,
 		},
-		Chunks: []rag.Chunk{
+		Content: memoryContent([]rag.Chunk{
 			{ID: "chunk-a", DocumentID: "doc-a", Text: "a"},
 			{ID: "chunk-b", DocumentID: "doc-b", Text: "b"},
-		},
+		}),
 		GenerationModel: "generator",
 	}, lexical, vector
 }

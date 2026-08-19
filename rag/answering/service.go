@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
 	"github.com/go-go-golems/ragkit/rag/retrieval"
 	"github.com/pkg/errors"
 )
@@ -20,7 +21,7 @@ type Service struct {
 	Vector          rag.Searcher
 	Reranker        rag.Reranker
 	Generator       rag.Generator
-	Chunks          []rag.Chunk
+	Content         content.Store
 	RerankingModel  string
 	GenerationModel string
 	Prompt          string
@@ -104,6 +105,9 @@ func (s *Service) ValidateRequest(request Request) error {
 		}
 	default:
 		return errors.Errorf("unknown retrieval strategy %q", request.Config.Strategy)
+	}
+	if s.Content == nil {
+		return errors.New("answering requires a content store")
 	}
 	if request.Config.RetrieveK <= 0 {
 		return errors.New("retrieve K must be greater than zero")
@@ -321,7 +325,7 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 	if request.Config.Strategy == StrategyRRFReranked {
 		evidenceLimit = request.Config.RerankCandidates
 	}
-	evidence, err := retrieval.Hydrate(result.Fused, s.Chunks, evidenceLimit)
+	evidence, err := retrieval.HydrateFromStore(ctx, result.Fused, s.Content, evidenceLimit)
 	if err != nil {
 		return RetrievalResult{}, errors.Wrap(err, "hydrate retrieval evidence")
 	}
@@ -352,11 +356,11 @@ func (s *Service) retrieve(ctx context.Context, request Request, state *observat
 	}
 	result.Evidence = evidence
 	if s.Augmenter != nil {
-		augmented, trace, err := s.Augmenter.Augment(ctx, result, s.Chunks)
+		augmented, trace, err := s.Augmenter.Augment(ctx, result, s.Content)
 		if err != nil {
 			return RetrievalResult{}, errors.Wrap(err, "augment retrieval")
 		}
-		augmented.Evidence, err = validateAugmentedEvidence(s.Chunks, augmented.Evidence)
+		augmented.Evidence, err = validateAugmentedEvidence(ctx, s.Content, augmented.Evidence)
 		if err != nil {
 			return RetrievalResult{}, errors.Wrap(err, "validate augmenter output")
 		}
@@ -445,7 +449,7 @@ func (s *Service) interpret(ctx context.Context, prepared Prepared, raw rag.Gene
 	if err := state.emit(ctx, StageContract, ObservationStarted, started, 0, nil, ""); err != nil {
 		return Result{}, err
 	}
-	validatedPrepared, err := s.validateStagedPrepared(prepared)
+	validatedPrepared, err := s.validateStagedPrepared(ctx, prepared)
 	if err != nil {
 		return Result{}, err
 	}
@@ -660,21 +664,13 @@ func validateRerankedEvidence(candidates, returned []rag.Evidence, requested int
 }
 
 // validateAugmentedEvidence treats augmenter chunks as references into the
-// service-owned corpus. The augmenter may choose order and scores, but it may
-// neither introduce nor alter source content.
-func validateAugmentedEvidence(chunks []rag.Chunk, returned []rag.Evidence) ([]rag.Evidence, error) {
-	byID := make(map[string]rag.Chunk, len(chunks))
-	for _, chunk := range chunks {
-		byID[chunk.ID] = chunk
-	}
+// service-owned content store. The augmenter may choose order and scores, but
+// it may neither introduce nor alter source content.
+func validateAugmentedEvidence(ctx context.Context, store content.Store, returned []rag.Evidence) ([]rag.Evidence, error) {
+	ids := make([]string, 0, len(returned))
 	seen := make(map[string]struct{}, len(returned))
-	validated := make([]rag.Evidence, len(returned))
 	for index, item := range returned {
 		id := item.Chunk.ID
-		chunk, ok := byID[id]
-		if !ok {
-			return nil, errors.Errorf("augmenter result %d references unknown chunk %q", index, id)
-		}
 		if _, duplicate := seen[id]; duplicate {
 			return nil, errors.Errorf("augmenter returned duplicate chunk %q", id)
 		}
@@ -682,7 +678,15 @@ func validateAugmentedEvidence(chunks []rag.Chunk, returned []rag.Evidence) ([]r
 		if err := validateEvidenceScores("augmenter", index, item); err != nil {
 			return nil, err
 		}
-		item.Chunk = chunk
+		ids = append(ids, id)
+	}
+	byID, err := loadReferencedChunks(ctx, store, ids, "augmenter")
+	if err != nil {
+		return nil, err
+	}
+	validated := make([]rag.Evidence, len(returned))
+	for index, item := range returned {
+		item.Chunk = byID[item.Chunk.ID]
 		validated[index] = item
 	}
 	return validated, nil
@@ -698,20 +702,14 @@ func validateEvidenceScores(role string, index int, item rag.Evidence) error {
 	return nil
 }
 
-func (s *Service) validateStagedPrepared(prepared Prepared) (Prepared, error) {
+func (s *Service) validateStagedPrepared(ctx context.Context, prepared Prepared) (Prepared, error) {
 	if prepared.CitationStyle == CitationStyleOrdinal {
 		if err := validateCitationLabels(prepared); err != nil {
 			return Prepared{}, err
 		}
 	}
-	byID := make(map[string]rag.Chunk, len(s.Chunks))
-	for _, chunk := range s.Chunks {
-		if _, exists := byID[chunk.ID]; exists {
-			return Prepared{}, errors.Errorf("service has duplicate chunk %q", chunk.ID)
-		}
-		byID[chunk.ID] = chunk
-	}
 	validated := append([]rag.Evidence(nil), prepared.Context.Evidence...)
+	ids := make([]string, 0, len(validated))
 	seen := make(map[string]struct{}, len(validated))
 	for index := range validated {
 		id := validated[index].Chunk.ID
@@ -722,15 +720,18 @@ func (s *Service) validateStagedPrepared(prepared Prepared) (Prepared, error) {
 				return Prepared{}, errors.Errorf("citation label %q has no immutable chunk mapping", validated[index].Chunk.ID)
 			}
 		}
-		chunk, ok := byID[id]
-		if !ok {
-			return Prepared{}, errors.Errorf("staged context evidence %d references unknown service chunk %q", index, id)
-		}
 		if _, duplicate := seen[id]; duplicate {
 			return Prepared{}, errors.Errorf("staged context duplicates service chunk %q", id)
 		}
 		seen[id] = struct{}{}
-		validated[index].Chunk = chunk
+		ids = append(ids, id)
+	}
+	byID, err := loadReferencedChunks(ctx, s.Content, ids, "staged context")
+	if err != nil {
+		return Prepared{}, err
+	}
+	for index, id := range ids {
+		validated[index].Chunk = byID[id]
 		if prepared.CitationStyle == CitationStyleOrdinal {
 			validated[index].Chunk.ID = fmt.Sprintf("E%d", index+1)
 			if prepared.CitationLabels[validated[index].Chunk.ID] != id {
@@ -740,6 +741,39 @@ func (s *Service) validateStagedPrepared(prepared Prepared) (Prepared, error) {
 	}
 	prepared.Context.Evidence = validated
 	return prepared, nil
+}
+
+func loadReferencedChunks(ctx context.Context, store content.Store, ids []string, role string) (map[string]rag.Chunk, error) {
+	if store == nil {
+		return nil, errors.Errorf("%s requires a content store", role)
+	}
+	if len(ids) == 0 {
+		return map[string]rag.Chunk{}, nil
+	}
+	chunks, err := store.Chunks(ctx, ids)
+	if err != nil {
+		return nil, errors.Wrapf(err, "load %s chunks", role)
+	}
+	requested := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		requested[id] = struct{}{}
+	}
+	byID := make(map[string]rag.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		if _, ok := requested[chunk.ID]; !ok {
+			return nil, errors.Errorf("content store returned unrequested %s chunk %q", role, chunk.ID)
+		}
+		if _, duplicate := byID[chunk.ID]; duplicate {
+			return nil, errors.Errorf("content store returned duplicate %s chunk %q", role, chunk.ID)
+		}
+		byID[chunk.ID] = chunk
+	}
+	for _, id := range ids {
+		if _, ok := byID[id]; !ok {
+			return nil, errors.Errorf("%s references unknown service chunk %q", role, id)
+		}
+	}
+	return byID, nil
 }
 
 func validateCitationLabels(prepared Prepared) error {

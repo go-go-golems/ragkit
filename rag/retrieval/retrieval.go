@@ -1,11 +1,13 @@
 package retrieval
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
 
 	"github.com/go-go-golems/ragkit/rag"
+	"github.com/go-go-golems/ragkit/rag/content"
 )
 
 // Target selects the identity used to collapse duplicate hits. It aliases
@@ -139,6 +141,55 @@ func Hydrate(hits []rag.FusedHit, chunks []rag.Chunk, limit int) ([]rag.Evidence
 			Chunk:          chunk,
 			Rank:           len(evidence) + 1,
 			RetrievalScore: hit.Score,
+		})
+	}
+	return evidence, nil
+}
+
+// HydrateFromStore resolves only the bounded fused candidate IDs through a
+// content store. Returned store rows are treated as untrusted: every requested
+// ID must appear exactly once and no unrequested row may cross the boundary.
+func HydrateFromStore(ctx context.Context, hits []rag.FusedHit, store content.Store, limit int) ([]rag.Evidence, error) {
+	if store == nil {
+		return nil, fmt.Errorf("cannot hydrate without a content store")
+	}
+	if limit < 1 || limit > len(hits) {
+		limit = len(hits)
+	}
+	if limit == 0 {
+		return []rag.Evidence{}, nil
+	}
+	ids := make([]string, 0, limit)
+	requested := make(map[string]struct{}, limit)
+	for _, hit := range hits[:limit] {
+		if _, duplicate := requested[hit.ChunkID]; duplicate {
+			return nil, fmt.Errorf("cannot hydrate duplicate fused chunk %q", hit.ChunkID)
+		}
+		requested[hit.ChunkID] = struct{}{}
+		ids = append(ids, hit.ChunkID)
+	}
+	chunks, err := store.Chunks(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load hydration chunks: %w", err)
+	}
+	byID := make(map[string]rag.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		if _, ok := requested[chunk.ID]; !ok {
+			return nil, fmt.Errorf("content store returned unrequested chunk %q", chunk.ID)
+		}
+		if _, duplicate := byID[chunk.ID]; duplicate {
+			return nil, fmt.Errorf("content store returned duplicate chunk %q", chunk.ID)
+		}
+		byID[chunk.ID] = chunk
+	}
+	evidence := make([]rag.Evidence, 0, limit)
+	for _, hit := range hits[:limit] {
+		chunk, ok := byID[hit.ChunkID]
+		if !ok {
+			return nil, fmt.Errorf("cannot hydrate missing chunk %q", hit.ChunkID)
+		}
+		evidence = append(evidence, rag.Evidence{
+			Chunk: chunk, Rank: len(evidence) + 1, RetrievalScore: hit.Score,
 		})
 	}
 	return evidence, nil
